@@ -1,0 +1,5 @@
+# Target-database drivers. Install the ones you need (psycopg is already in requirements.lock).
+oracledb>=2.4        # Oracle (thin mode; thick mode needs Oracle Instant Client)
+mariadb>=1.1         # MariaDB Connector/Python (needs MariaDB Connector/C on the host)
+concurrent-log-handler>=0.9.25 ; sys_platform == "win32"
+tokenizers>=0.19     # optional: exact Qwen token counts via llm params.tokenizer_path

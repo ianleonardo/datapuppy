@@ -1,0 +1,60 @@
+# config/sqlassist.example.toml
+[server]
+host = "0.0.0.0"
+port = 8080
+public_base_url = "https://sqlassist.example.internal"
+ssl_certfile = ""          # empty → plain HTTP (requires allow_insecure_http)
+ssl_keyfile  = ""
+allow_insecure_http = false
+
+[paths]
+data_dir = "./data"        # absolute or relative to install_dir
+# log_dir defaults to {data_dir}/logs
+
+[logging]
+dir = ""                   # empty → {data_dir}/logs
+level = "INFO"
+format = "json"
+retention_days = 30
+
+[duckdb]
+memory_limit = "4GB"
+threads = 8
+backup_cron = "0 2 * * *"
+backup_keep = 7
+
+[security]
+master_key_file = "./config/master.key"
+
+[llm.defaults]             # seeds llm_providers on first start; editable later in Admin
+primary_chat  = "SPIRARE"  # OQ-14
+primary_embed = "SPIRARE"
+
+[llm.gemini]
+chat_model  = "gemini-3.6-flash"
+embed_model = "gemini-embedding-2"
+base_url    = "https://generativelanguage.googleapis.com/v1beta"
+verify_ssl  = true
+use_proxy   = true
+api_key     = ""           # optional seed; stored encrypted, then blank this line
+
+[llm.spirare]
+chat_url      = "https://s-egp.sg.uobnet.com/nlp/v1/chat/completions"
+chat_model    = "Qwen3.5-122B-A10B"
+max_model_len = 32768
+embed_url     = "https://s-egp.sg.uobnet.com/embedding/v1/embeddings"
+embed_model   = "/data/genai/models/bge-m3"
+verify_ssl    = false      # TLS verification bypassed
+use_proxy     = false      # proxy bypassed
+api_key       = ""
+
+[auth]
+local_enabled = true
+ldap_enabled  = false      # LDAP details configured in Admin → Authentication (or [auth.ldap] below)
+
+[auth.ldap]
+server_urls = ["ldaps://<ldap-host>:636"]
+base_dn = "DC=<domain>,DC=<tld>"
+user_filter = "(&(objectClass=user)(sAMAccountName={user_id}))"
+bind_mode = "search_then_bind"
+bind_dn = ""

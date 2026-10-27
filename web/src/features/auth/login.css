@@ -1,0 +1,697 @@
+/* ============================== login layout ============================== */
+.login {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: var(--font-body);
+  color: var(--ink);
+}
+.scene {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.login-stage {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(220px, 360px);
+  align-items: center;
+  justify-content: center;
+  gap: clamp(8px, 3vw, 48px);
+  padding: 24px 16px 72px;
+}
+.login-card {
+  background: var(--surface);
+  border: var(--border-w) solid var(--line);
+  border-radius: 28px;
+  padding: 34px 34px 28px;
+  box-shadow: var(--shadow);
+  animation: card-in 0.7s cubic-bezier(0.2, 0.9, 0.3, 1.2) both 0.15s;
+}
+.login-tag {
+  margin: 6px 0 22px;
+  color: var(--ink-2);
+  font-size: 16px;
+}
+.login-form {
+  display: grid;
+  gap: 14px;
+}
+.fld {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.fld input {
+  font: inherit;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: var(--border-w) solid var(--line-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.fld input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.btn-signin {
+  margin-top: 6px;
+  font: 700 17px var(--font-display);
+  letter-spacing: 0.01em;
+  padding: 13px 18px;
+  border-radius: var(--submit-shape);
+  border: var(--border-w) solid var(--line);
+  color: var(--brand-ink);
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--btn-brand), var(--btn-brand-2));
+  box-shadow: var(--shadow);
+  transition:
+    transform 0.12s,
+    filter 0.12s;
+}
+.btn-signin:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+.btn-signin:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn-signin:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.login-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--pill-bad-bg);
+  color: var(--pill-bad-ink);
+  font-weight: 700;
+  font-size: 14px;
+}
+.login-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.login-note.warn {
+  color: var(--pill-warn-ink);
+}
+.login-pup {
+  width: min(32vw, 340px);
+  aspect-ratio: 1;
+  align-self: end;
+  margin-bottom: 4vh;
+  animation: pup-arrive 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.3) both 0.35s;
+  filter: drop-shadow(0 10px 0 rgba(0, 0, 0, 0.06));
+}
+.theme-peek {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1.5px solid var(--line-soft);
+  padding: 6px 8px 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--ink-2);
+  backdrop-filter: blur(6px);
+}
+.theme-peek button {
+  font: 700 13px var(--font-body);
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.theme-peek button.on {
+  background: var(--btn-brand);
+  color: var(--brand-ink);
+  border-color: var(--line);
+}
+.theme-peek button:hover:not(.on) {
+  border-color: var(--line-soft);
+}
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pup-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (max-width: 760px) {
+  .login-stage {
+    grid-template-columns: 1fr;
+    align-content: center;
+  }
+  .login-pup {
+    position: absolute;
+    width: 150px;
+    right: 8px;
+    bottom: 60px;
+    margin: 0;
+  }
+  .login-card {
+    padding: 26px 20px;
+  }
+}
+
+/* per-theme card personality */
+.login[data-theme='afternoon'] .login-card {
+  border-radius: 22px;
+  box-shadow: 6px 7px 0 var(--line);
+}
+.login[data-theme='afternoon'] .btn-signin {
+  box-shadow: 3px 4px 0 var(--line);
+}
+.login[data-theme='night'] .login-card {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: var(--glow), var(--shadow);
+}
+.login[data-theme='night'] .btn-signin {
+  border-color: transparent;
+  color: #1c1a3a;
+  box-shadow: 0 0 24px rgba(255, 159, 67, 0.35);
+}
+
+/* ============================== MORNING: sunrise fetch ============================== */
+.scene-morning {
+  background: linear-gradient(180deg, #bfe6ff 0%, #ddf0fd 34%, #ffe6c4 68%, #ffd79f 100%);
+}
+.m-sun {
+  position: absolute;
+  right: 7%;
+  top: 6%;
+  animation: sun-rise 3.2s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.m-rays {
+  animation: spin 60s linear infinite;
+  transform-origin: 0 0;
+}
+.m-cloud {
+  position: absolute;
+  filter: drop-shadow(0 6px 0 rgba(142, 205, 247, 0.35));
+}
+.m-cloud.c1 {
+  top: 9%;
+  left: -260px;
+  animation: drift 70s linear infinite;
+}
+.m-cloud.c2 {
+  top: 26%;
+  left: -200px;
+  animation: drift 95s linear infinite -40s;
+  opacity: 0.85;
+}
+.m-cloud.c3 {
+  top: 4%;
+  left: -240px;
+  animation: drift 120s linear infinite -80s;
+  opacity: 0.9;
+}
+.m-hills {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 34%;
+  animation: hills-up 1.6s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.m-trail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.m-paw {
+  opacity: 0;
+  animation: paw-step 7.2s ease-in-out infinite;
+}
+.m-paw.p0 {
+  animation-delay: 1.2s;
+}
+.m-paw.p1 {
+  animation-delay: 1.5s;
+}
+.m-paw.p2 {
+  animation-delay: 1.8s;
+}
+.m-paw.p3 {
+  animation-delay: 2.1s;
+}
+.m-paw.p4 {
+  animation-delay: 2.4s;
+}
+.m-paw.p5 {
+  animation-delay: 2.7s;
+}
+.m-paw.p6 {
+  animation-delay: 3s;
+}
+.m-paw.p7 {
+  animation-delay: 3.3s;
+}
+.m-paw.p8 {
+  animation-delay: 3.6s;
+}
+@keyframes sun-rise {
+  from {
+    transform: translateY(46vh) scale(0.85);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes hills-up {
+  from {
+    transform: translateY(40%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(100vw + 520px));
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes paw-step {
+  0% {
+    opacity: 0;
+    transform-box: fill-box;
+  }
+  6% {
+    opacity: 0.55;
+  }
+  55% {
+    opacity: 0.55;
+  }
+  75%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ============================== AFTERNOON: heavenly dog ============================== */
+.scene-afternoon {
+  background: var(--frame);
+}
+.scene-afternoon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(900px 520px at 70% 110%, rgba(255, 166, 82, 0.55), transparent 70%);
+}
+.a-sun {
+  position: absolute;
+  right: 9%;
+  top: 7%;
+  animation: sun-bob 8s ease-in-out infinite;
+}
+.a-bite {
+  animation: eclipse 9s ease-in-out infinite;
+}
+.a-ray {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.a-sun svg {
+  overflow: visible;
+}
+.a-sun svg > path {
+  animation: ray-pulse 3s ease-in-out infinite;
+}
+.a-cloud {
+  position: absolute;
+  z-index: 1;
+}
+.a-cloud.k1 {
+  left: 4%;
+  top: 58%;
+  animation:
+    cloud-bob 7s ease-in-out infinite,
+    cloud-sway 26s ease-in-out infinite alternate;
+}
+.a-cloud.k2 {
+  right: 6%;
+  top: 46%;
+  animation:
+    cloud-bob 6s ease-in-out infinite -2s,
+    cloud-sway 30s ease-in-out infinite alternate-reverse;
+}
+.a-cloud.k3 {
+  left: 30%;
+  top: 4%;
+  animation:
+    cloud-bob 8s ease-in-out infinite -4s,
+    cloud-sway 36s ease-in-out infinite alternate;
+  opacity: 0.95;
+}
+.a-cloud.k4 {
+  right: 28%;
+  bottom: 3%;
+  animation: cloud-bob 5s ease-in-out infinite -1s;
+}
+.a-sparkle {
+  position: absolute;
+  animation: twinkle 2.6s ease-in-out infinite;
+}
+.a-confetti span {
+  position: absolute;
+  top: -30px;
+  animation: confetti-fall linear infinite;
+}
+.a-confetti i {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid #4b2a1b;
+}
+.login[data-theme='afternoon'] .login-pup {
+  animation:
+    pup-arrive 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.3) both 0.35s,
+    tiangou-float 4.6s ease-in-out infinite 1.3s;
+}
+.login[data-theme='afternoon'] .login-pup::after {
+  content: '';
+  display: block;
+}
+@keyframes sun-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+  50% {
+    transform: translateY(10px) rotate(6deg);
+  }
+}
+@keyframes eclipse {
+  0%,
+  20% {
+    transform: translate(0, 0);
+  }
+  50%,
+  62% {
+    transform: translate(-34px, 14px);
+  }
+  92%,
+  100% {
+    transform: translate(0, 0);
+  }
+}
+@keyframes ray-pulse {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+@keyframes cloud-bob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -12px;
+  }
+}
+@keyframes cloud-sway {
+  from {
+    transform: translateX(-30px);
+  }
+  to {
+    transform: translateX(40px);
+  }
+}
+@keyframes twinkle {
+  0%,
+  100% {
+    transform: scale(0.55) rotate(0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.1) rotate(45deg);
+    opacity: 1;
+  }
+}
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-40px) rotate(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(110vh) rotate(540deg);
+    opacity: 0.9;
+  }
+}
+@keyframes tiangou-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -16px;
+  }
+}
+
+/* ============================== NIGHT: data constellation ============================== */
+.scene-night {
+  background: radial-gradient(1100px 700px at 15% -5%, #2e2a6e 0%, #1a1840 45%, #100e26 100%);
+}
+.n-stars {
+  position: absolute;
+  inset: 0;
+}
+.n-stars circle {
+  animation: star 3s ease-in-out infinite;
+}
+.n-moon {
+  position: absolute;
+  left: 7%;
+  top: 9%;
+  filter: drop-shadow(0 0 28px rgba(255, 214, 140, 0.55));
+  animation: moon-glow 6s ease-in-out infinite;
+}
+.n-constellation {
+  position: absolute;
+  right: 4%;
+  top: 2%;
+  width: min(500px, 42vw);
+  opacity: 0.95;
+}
+.n-edge {
+  stroke: #5aa9ff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 160;
+  stroke-dashoffset: 160;
+  animation: draw 1.1s ease-out forwards;
+  opacity: 0.85;
+}
+.n-node {
+  fill: #ffb15c;
+  animation: node-pulse 2.8s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.n-node.nose {
+  fill: #ff6b6b;
+}
+.n-node.eye {
+  fill: #3ef08f;
+}
+.n-packet {
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.n-shoot {
+  position: absolute;
+  width: 140px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), #fff);
+  border-radius: 2px;
+  opacity: 0;
+  transform: rotate(-24deg);
+}
+.n-shoot.s1 {
+  top: 14%;
+  left: 8%;
+  animation: shoot 7s ease-in infinite 1.5s;
+}
+.n-shoot.s2 {
+  top: 32%;
+  left: 54%;
+  animation: shoot 9s ease-in infinite 4.2s;
+}
+.n-shoot.s3 {
+  top: 6%;
+  left: 70%;
+  animation: shoot 11s ease-in infinite 7s;
+}
+.n-words span {
+  position: absolute;
+  bottom: -30px;
+  font:
+    600 13px 'JetBrains Mono',
+    monospace;
+  color: #8c86b8;
+  opacity: 0;
+  animation: word-rise 18s linear infinite;
+}
+.n-horizon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22%;
+  background: linear-gradient(180deg, transparent, rgba(90, 169, 255, 0.1));
+}
+.login[data-theme='night'] .login-pup {
+  filter: drop-shadow(0 0 22px rgba(90, 169, 255, 0.35));
+}
+@keyframes star {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes moon-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 22px rgba(255, 214, 140, 0.45));
+  }
+  50% {
+    filter: drop-shadow(0 0 36px rgba(255, 214, 140, 0.7));
+  }
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes node-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.45);
+    opacity: 1;
+  }
+}
+@keyframes shoot {
+  0% {
+    opacity: 0;
+    translate: 0 0;
+  }
+  3% {
+    opacity: 1;
+  }
+  12% {
+    opacity: 0;
+    translate: 320px 140px;
+  }
+  100% {
+    opacity: 0;
+    translate: 320px 140px;
+  }
+}
+@keyframes word-rise {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.5;
+  }
+  80% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateY(-70vh);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene *,
+  .login-card,
+  .login-pup {
+    animation: none !important;
+  }
+  .n-edge {
+    stroke-dashoffset: 0;
+  }
+  .m-paw {
+    opacity: 0.4;
+  }
+}
+
+.theme-peek button small {
+  font-weight: 600;
+  opacity: 0.75;
+  margin-left: 4px;
+}
+.login-credit {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  text-align: center;
+  color: var(--ink-2);
+  letter-spacing: 0.01em;
+}

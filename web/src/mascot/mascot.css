@@ -1,0 +1,598 @@
+/* Mascot mood animations (TS §16.1, §17.1). All transforms use transform-box: view-box with explicit origins. */
+.pup {
+  overflow: visible;
+  display: block;
+}
+.pup * {
+  transform-box: view-box;
+}
+.pup-all {
+  transform-origin: 110px 206px;
+}
+.pup-jump {
+  transform-origin: 110px 206px;
+}
+.pup-tail {
+  transform-origin: 146px 160px;
+}
+.pup-head {
+  transform-origin: 110px 130px;
+}
+.pup-ear-l {
+  transform-origin: 70px 62px;
+}
+.pup-ear-r {
+  transform-origin: 150px 62px;
+}
+.pup-eyes,
+.pup-eyes-closed,
+.pup-eyes-happy {
+  transform-origin: 110px 90px;
+}
+.pup-nose {
+  transform-origin: 110px 101px;
+}
+.pup-body {
+  transform-origin: 110px 200px;
+}
+.pup-paw-l {
+  transform-origin: 97px 199px;
+}
+.pup-paw-r {
+  transform-origin: 123px 199px;
+}
+.pup-bell {
+  transform-origin: 110px 138px;
+}
+.pup-paw-raise {
+  transform-origin: 126px 160px;
+}
+
+/* hidden-by-default parts */
+.pup .pup-eyes-closed,
+.pup .pup-eyes-happy,
+.pup .pup-tongue,
+.pup .pup-yawn,
+.pup .pup-mouth-flat,
+.pup .pup-brows,
+.pup .pup-brows-worry,
+.pup .pup-cover,
+.pup .pup-paw-raise,
+.pup .ov {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+/* ---------- idle & attentive (default) ---------- */
+.pup[data-mood='idle'] .pup-eyes {
+  animation: pup-blink 4.6s infinite;
+}
+.pup[data-mood='idle'] .pup-tail {
+  animation: pup-wag 1.6s ease-in-out infinite;
+}
+.pup[data-mood='idle'] .pup-body {
+  animation: pup-breathe 3.2s ease-in-out infinite;
+}
+.pup[data-mood='idle'] .pup-head {
+  animation: pup-attend 6s ease-in-out infinite;
+}
+.pup[data-theme='afternoon'][data-mood='idle'] .pup-bell {
+  animation: pup-jingle 3s ease-in-out infinite;
+}
+
+/* ---------- thinking / digging ---------- */
+.pup[data-mood='thinking'] .pup-head {
+  animation: pup-tilt 1.8s ease-in-out infinite;
+}
+.pup[data-mood='thinking'] .ov-think,
+.pup[data-mood='thinking'] .ov-dig {
+  opacity: 1;
+}
+.pup[data-mood='thinking'] .ov-think .dot {
+  animation: pup-dot 1.2s ease-in-out infinite;
+}
+.pup[data-mood='thinking'] .ov-think .d2 {
+  animation-delay: 0.2s;
+}
+.pup[data-mood='thinking'] .ov-think .d3 {
+  animation-delay: 0.4s;
+}
+.pup[data-mood='thinking'] .pup-paw-l {
+  animation: pup-dig 0.36s ease-in-out infinite;
+}
+.pup[data-mood='thinking'] .pup-paw-r {
+  animation: pup-dig 0.36s ease-in-out infinite 0.18s;
+}
+.pup[data-mood='thinking'] .ov-dig {
+  animation: pup-dirt 0.72s linear infinite;
+}
+.pup[data-mood='thinking'] .pup-tail {
+  animation: pup-wag 1s ease-in-out infinite;
+}
+
+/* ---------- happy & celebratory ---------- */
+.pup[data-mood='happy'] .pup-jump {
+  animation: pup-bounce 0.7s cubic-bezier(0.3, 0.7, 0.4, 1) 3;
+}
+.pup[data-mood='happy'] .pup-tail {
+  animation: pup-wag 0.22s linear infinite;
+}
+.pup[data-mood='happy'] .pup-eyes {
+  opacity: 0;
+}
+.pup[data-mood='happy'] .pup-eyes-happy,
+.pup[data-mood='happy'] .pup-tongue {
+  opacity: 1;
+}
+.pup[data-mood='happy'] .ov-woof {
+  opacity: 1;
+  animation: pup-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.pup[data-mood='happy'] .pup-bell {
+  animation: pup-jingle 0.4s ease-in-out infinite;
+}
+
+/* ---------- excited (notable insight) ---------- */
+.pup[data-mood='excited'] .pup-jump {
+  animation: pup-jump 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) infinite;
+}
+.pup[data-mood='excited'] .pup-tail {
+  animation: pup-wag 0.18s linear infinite;
+}
+.pup[data-mood='excited'] .pup-eyes {
+  opacity: 0;
+}
+.pup[data-mood='excited'] .pup-eyes-happy,
+.pup[data-mood='excited'] .pup-tongue,
+.pup[data-mood='excited'] .ov-sparkle {
+  opacity: 1;
+}
+.pup[data-mood='excited'] .ov-sparkle path {
+  animation: pup-twinkle 1s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+.pup[data-mood='excited'] .ov-sparkle .sp2 {
+  animation-delay: 0.25s;
+}
+.pup[data-mood='excited'] .ov-sparkle .sp3 {
+  animation-delay: 0.5s;
+}
+.pup[data-mood='excited'] .ov-sparkle .sp4 {
+  animation-delay: 0.75s;
+}
+
+/* ---------- confused & inquiring ---------- */
+.pup[data-mood='confused'] .pup-ear-l {
+  transform: rotate(22deg);
+  transition: transform 0.3s;
+}
+.pup[data-mood='confused'] .pup-ear-r {
+  transform: rotate(-22deg);
+  transition: transform 0.3s;
+}
+.pup[data-mood='confused'] .pup-head {
+  animation: pup-puzzle 2.4s ease-in-out infinite;
+}
+.pup[data-mood='confused'] .pup-mouth {
+  opacity: 0;
+}
+.pup[data-mood='confused'] .pup-mouth-flat,
+.pup[data-mood='confused'] .pup-brows-worry,
+.pup[data-mood='confused'] .ov-question {
+  opacity: 1;
+}
+.pup[data-mood='confused'] .ov-question {
+  animation: pup-float 1.6s ease-in-out infinite;
+  transform-origin: 176px 34px;
+}
+.pup[data-mood='confused'] .pup-tail {
+  animation: pup-wag 3s ease-in-out infinite;
+}
+
+/* ---------- protective / guardian mode ---------- */
+.pup[data-mood='protective'] .pup-paw-raise,
+.pup[data-mood='protective'] .pup-brows,
+.pup[data-mood='protective'] .ov-alert,
+.pup[data-mood='protective'] .pup-mouth-flat {
+  opacity: 1;
+}
+.pup[data-mood='protective'] .pup-mouth {
+  opacity: 0;
+}
+.pup[data-mood='protective'] .pup-paw-r {
+  opacity: 0;
+}
+.pup[data-mood='protective'] .pup-paw-raise {
+  animation: pup-stop 1.4s ease-in-out infinite;
+}
+.pup[data-mood='protective'] .pup-jump {
+  transform: translateY(-3px);
+}
+.pup[data-mood='protective'] .ov-alert {
+  animation:
+    pup-pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) both,
+    pup-pulse 1.4s ease-in-out 0.5s infinite;
+  transform-origin: 186px 30px;
+}
+
+/* ---------- sniffing / curious ---------- */
+.pup[data-mood='sniffing'] .pup-head {
+  animation: pup-sniff-lean 2.4s ease-in-out infinite;
+}
+.pup[data-mood='sniffing'] .pup-nose {
+  animation: pup-nose 0.32s ease-in-out infinite;
+}
+.pup[data-mood='sniffing'] .ov-sniff {
+  opacity: 1;
+}
+.pup[data-mood='sniffing'] .ov-sniff path {
+  animation: pup-sniffline 1.2s ease-out infinite;
+}
+.pup[data-mood='sniffing'] .ov-sniff .s2 {
+  animation-delay: 0.2s;
+}
+.pup[data-mood='sniffing'] .ov-sniff .s3 {
+  animation-delay: 0.4s;
+}
+.pup[data-mood='sniffing'] .pup-tail {
+  animation: pup-wag 0.9s ease-in-out infinite;
+}
+
+/* ---------- sleepy ---------- */
+.pup[data-mood='sleepy'] .pup-eyes {
+  opacity: 0;
+}
+.pup[data-mood='sleepy'] .pup-eyes-closed,
+.pup[data-mood='sleepy'] .ov-zzz {
+  opacity: 1;
+}
+.pup[data-mood='sleepy'] .pup-head {
+  transform: rotate(9deg) translateY(6px);
+  transition: transform 0.8s;
+}
+.pup[data-mood='sleepy'] .pup-ear-l {
+  transform: rotate(14deg);
+}
+.pup[data-mood='sleepy'] .pup-ear-r {
+  transform: rotate(-14deg);
+}
+.pup[data-mood='sleepy'] .pup-body {
+  animation: pup-breathe 4.4s ease-in-out infinite;
+}
+.pup[data-mood='sleepy'] .ov-zzz text {
+  animation: pup-zzz 3s ease-in infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.pup[data-mood='sleepy'] .ov-zzz .z2 {
+  animation-delay: 1s;
+}
+.pup[data-mood='sleepy'] .ov-zzz .z3 {
+  animation-delay: 2s;
+}
+
+/* ---------- waking up: stretch, yawn, shake ---------- */
+.pup[data-mood='waking'] .pup-all {
+  animation: pup-stretch 1.8s ease-in-out both;
+}
+.pup[data-mood='waking'] .pup-eyes {
+  opacity: 0;
+}
+.pup[data-mood='waking'] .pup-eyes-closed {
+  opacity: 1;
+  animation: pup-fade-out 1.8s steps(1) both;
+}
+.pup[data-mood='waking'] .pup-yawn {
+  opacity: 1;
+  animation: pup-yawn 1.8s ease-in-out both;
+  transform-origin: 110px 112px;
+}
+.pup[data-mood='waking'] .pup-mouth {
+  opacity: 0;
+}
+.pup[data-mood='waking'] .pup-head {
+  animation: pup-shake 0.45s ease-in-out 1.3s 2;
+}
+
+/* ---------- cover eyes (login password) ---------- */
+.pup[data-cover='1'] .pup-cover {
+  opacity: 1;
+}
+.pup[data-cover='1'] .pup-eyes,
+.pup[data-cover='1'] .pup-eyes-happy {
+  opacity: 0 !important;
+}
+.pup[data-cover='1'] .pup-cover {
+  animation: pup-cover-in 0.3s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  transform-origin: 110px 130px;
+}
+
+/* ---------- keyframes ---------- */
+@keyframes pup-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes pup-wag {
+  0%,
+  100% {
+    transform: rotate(-10deg);
+  }
+  50% {
+    transform: rotate(14deg);
+  }
+}
+@keyframes pup-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.018, 1.03);
+  }
+}
+@keyframes pup-attend {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0);
+  }
+  78% {
+    transform: rotate(-5deg);
+  }
+  86% {
+    transform: rotate(3deg);
+  }
+}
+@keyframes pup-tilt {
+  0%,
+  100% {
+    transform: rotate(-9deg);
+  }
+  50% {
+    transform: rotate(7deg);
+  }
+}
+@keyframes pup-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@keyframes pup-dig {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+  50% {
+    transform: translate(0, -7px) rotate(-12deg);
+  }
+}
+@keyframes pup-dirt {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+}
+@keyframes pup-bounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  15% {
+    transform: translateY(0) scale(1.06, 0.92);
+  }
+  50% {
+    transform: translateY(-14px) scale(0.97, 1.04);
+  }
+}
+@keyframes pup-jump {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  12% {
+    transform: scale(1.1, 0.88);
+  }
+  45% {
+    transform: translateY(-26px) rotate(-4deg) scale(0.96, 1.06);
+  }
+  70% {
+    transform: translateY(-6px) rotate(3deg);
+  }
+}
+@keyframes pup-pop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes pup-twinkle {
+  0%,
+  100% {
+    transform: scale(0.6) rotate(0);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.15) rotate(25deg);
+    opacity: 1;
+  }
+}
+@keyframes pup-puzzle {
+  0%,
+  100% {
+    transform: rotate(14deg);
+  }
+  50% {
+    transform: rotate(18deg) translateY(-2px);
+  }
+}
+@keyframes pup-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-6deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(8deg);
+  }
+}
+@keyframes pup-stop {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  50% {
+    transform: rotate(-7deg);
+  }
+}
+@keyframes pup-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+@keyframes pup-sniff-lean {
+  0%,
+  100% {
+    transform: rotate(-8deg) translate(-4px, 4px);
+  }
+  50% {
+    transform: rotate(-3deg) translate(-2px, 2px);
+  }
+}
+@keyframes pup-nose {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.18, 0.9);
+  }
+}
+@keyframes pup-sniffline {
+  0% {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+@keyframes pup-zzz {
+  0% {
+    transform: translate(0, 8px) scale(0.6);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(10px, -14px) scale(1.1);
+    opacity: 0;
+  }
+}
+@keyframes pup-stretch {
+  0% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.12, 0.86);
+  }
+  55% {
+    transform: scale(0.95, 1.07) translateY(-4px);
+  }
+  75%,
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes pup-yawn {
+  0% {
+    transform: scale(0.2);
+  }
+  30%,
+  55% {
+    transform: scale(1.2);
+  }
+  80%,
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+@keyframes pup-fade-out {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes pup-shake {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-9deg);
+  }
+  75% {
+    transform: rotate(9deg);
+  }
+}
+@keyframes pup-jingle {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-12deg);
+  }
+  75% {
+    transform: rotate(12deg);
+  }
+}
+@keyframes pup-cover-in {
+  0% {
+    transform: translateY(40px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pup *,
+  .pup {
+    animation: none !important;
+    transition: none !important;
+  }
+}

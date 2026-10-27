@@ -1,0 +1,44 @@
+{
+  "name": "sqlassist-web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "check": "vp check",
+    "test": "vp test",
+    "preview": "vp preview"
+  },
+  "dependencies": {
+    "@fontsource/fredoka": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
+    "@monaco-editor/react": "^4.7.0",
+    "@radix-ui/react-dropdown-menu": "^2.1.15",
+    "@radix-ui/react-select": "^2.2.5",
+    "@tanstack/react-query": "^5.80.0",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.13.10",
+    "dockview-react": "^4.4.0",
+    "dompurify": "^3.2.6",
+    "marked": "^15.0.12",
+    "mermaid": "^11.6.0",
+    "monaco-editor": "^0.52.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.10",
+    "@testing-library/react": "^16.3.0",
+    "@types/dompurify": "^3.2.0",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.5.2",
+    "jsdom": "^26.1.0",
+    "tailwindcss": "^4.1.10",
+    "typescript": "^5.8.3",
+    "vite-plus": "^1.4.0"
+  }
+}

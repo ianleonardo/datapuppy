@@ -1,0 +1,19 @@
+[Unit]
+Description=AI SQL Assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sqlassist
+Group=sqlassist
+Environment=SQLASSIST_CONFIG=/opt/sqlassist/config/sqlassist.toml
+ExecStart=/opt/sqlassist/scripts/start.sh --foreground
+ExecStop=/opt/sqlassist/scripts/stop.sh
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
