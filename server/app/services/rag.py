@@ -290,14 +290,16 @@ def rrf(*legs: list[dict], k: int = 60) -> list[dict]:
 
 
 async def retrieve_knowledge(store: AppStore, ctx: RequestContext, prompt: str, qvec: list[float] | None,
-                             country: str | None, conn: str | None) -> list[dict]:
+                             country: str | None, conn: str | None, kind: str = "REFERENCE") -> list[dict]:
+    """Hybrid retrieval over one kind of document: REFERENCE (background) or GUIDELINE (admin rules)."""
     k = 8
     vec_leg: list[dict] = []
     if qvec is not None:
-        vec_leg = await asyncio.to_thread(knowledge_vector_search, store, ctx, qvec, len(qvec), country, conn, k)
+        vec_leg = await asyncio.to_thread(knowledge_vector_search, store, ctx, qvec, len(qvec), country, conn, k, kind)
     kw_leg = await asyncio.to_thread(knowledge_keyword_search, store, ctx, prompt, country, conn, k,
-                                     bool(store.extensions.get("fts")))
-    fused = rrf(vec_leg, kw_leg)[: int(settings.get("rag.knowledge_top_k", 6))]
+                                     bool(store.extensions.get("fts")), kind)
+    top = int(settings.get("rag.guideline_top_k", 4) if kind == "GUIDELINE" else settings.get("rag.knowledge_top_k", 6))
+    fused = rrf(vec_leg, kw_leg)[:top]
     if fused:
         names = {str(r["id"]): r["filename"] for r in await store.fetchall(
             "SELECT id, filename FROM documents WHERE list_contains(?, CAST(id AS VARCHAR))",

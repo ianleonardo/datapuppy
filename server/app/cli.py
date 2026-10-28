@@ -146,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--foreground", "-Foreground", action="store_true")
     sub.add_parser("stop", help="graceful stop with forced fallback")
     sub.add_parser("status")
+    p = sub.add_parser("health", help="exit 0 if /healthz answers (used by the Docker HEALTHCHECK)")
+    p.add_argument("--print-url", action="store_true", help="also print the scheme://host:port the server uses")
     p = sub.add_parser("create-admin")
     p.add_argument("--user-id", required=True)
     sub.add_parser("rotate-master-key")
@@ -161,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         "start": lambda: __import__("app.control", fromlist=["start"]).start(a.foreground),
         "stop": lambda: __import__("app.control", fromlist=["stop"]).stop(),
         "status": lambda: __import__("app.control", fromlist=["status"]).status(),
+        "health": lambda: __import__("app.control", fromlist=["health"]).health(a.print_url),
         "create-admin": lambda: _create_admin(a.user_id),
         "rotate-master-key": _rotate,
         "backup": lambda: _backup(a.to),

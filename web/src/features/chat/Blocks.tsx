@@ -4,6 +4,8 @@ import { useMemo } from 'react';
 import { useApp } from '../../app/store';
 import { runQuery } from '../../lib/exec';
 import { HighlightedSql } from '../../lib/sql';
+import { Icon, IconButton } from '../../lib/icons';
+import { markdownToSpeech } from '../../lib/speech';
 import { copyText } from '../../lib/toast';
 
 export type Block = {
@@ -41,9 +43,11 @@ function SqlCard({
         <button className="btn btn-sm btn-ghost" onClick={() => openInEditor(p.sql)}>
           Open in editor
         </button>
-        <button className="btn btn-sm" onClick={() => copyText(p.sql, 'SQL copied')}>
-          Copy
-        </button>
+        <IconButton
+          label="Copy SQL"
+          icon={<Icon.copy />}
+          onClick={() => copyText(p.sql, 'SQL copied')}
+        />
       </div>
       <pre className="sqlcode">
         <code>
@@ -94,12 +98,11 @@ export function MermaidBlock({ p }: { p: Record<string, any> }) {
         <button className="btn btn-sm" onClick={() => setErd({ source: p.source, title: p.title })}>
           Show in ER panel
         </button>
-        <button
-          className="btn btn-sm btn-ghost"
+        <IconButton
+          label="Copy diagram source"
+          icon={<Icon.copy />}
           onClick={() => copyText(p.source, 'Mermaid source copied')}
-        >
-          Copy source
-        </button>
+        />
       </div>
     </div>
   );
@@ -216,6 +219,42 @@ export function BlockView({
     default:
       return null;
   }
+}
+
+/** What "Read aloud" says for a reply: prose and findings; SQL, diagrams and tables are only mentioned. */
+export function blocksToSpeech(blocks: Block[]): string {
+  let saidSql = false;
+  return blocks
+    .map((b) => {
+      const p = b.props || {};
+      switch (b.type) {
+        case 'paragraph':
+          return markdownToSpeech((b.content || []).map((c) => c.text).join(''));
+        case 'sqlCard':
+          if (saidSql) return '';
+          saidSql = true;
+          return 'The SQL query is in the card below.';
+        case 'mermaid':
+          return 'There is a diagram below.';
+        case 'insight': {
+          const parts: string[] = [];
+          if (p.insights?.length) parts.push('Key points. ' + p.insights.join('. '));
+          if (p.anomalies?.length) parts.push('Worth a closer look. ' + p.anomalies.join('. '));
+          return parts.join('. ');
+        }
+        case 'review':
+          return (p.issues || []).map((i: any) => `Line ${i.line}: ${i.message}`).join('. ');
+        case 'hygiene':
+          return (p.flagged || [])
+            .map((f: any) => `${f.table}: ${f.reason}. ${f.recommendation}`)
+            .join('. ');
+        default:
+          return '';
+      }
+    })
+    .filter(Boolean)
+    .map((t) => (/[.!?:]$/.test(t.trim()) ? t.trim() : t.trim() + '.'))
+    .join('\n');
 }
 
 export function blocksToMarkdown(blocks: Block[]): string {

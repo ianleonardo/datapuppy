@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, get } from '../../api/client';
+import './docviewer.css';
 
 const API = '/api/v1';
 

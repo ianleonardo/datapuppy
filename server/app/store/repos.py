@@ -181,14 +181,42 @@ class RunRepo(UserScopedRepo):
         row["columns"] = _j(row["columns"])
         return row
 
+    async def history(self, connection_id: str | None = None, q: str | None = None, origin: str | None = None,
+                      limit: int = 50) -> list[dict]:
+        """The user's executed queries, newest first, one entry per distinct SQL text (per database)."""
+        where = ["r.owner_ref = ?", "r.status <> 'PENDING'"]
+        params: list[Any] = [self.owner]
+        if connection_id:
+            where.append("r.connection_id = ?")
+            params.append(connection_id)
+        if q:
+            where.append("r.sql_text ILIKE ?")
+            params.append(f"%{q}%")
+        if origin == "MANUAL":
+            where.append("r.origin = 'MANUAL'")
+        elif origin == "AI":
+            where.append("r.origin IN ('AI', 'REFINED')")
+        sql = (
+            "SELECT r.id, r.connection_id, c.name AS connection_name, c.engine, r.origin, r.sql_text, r.status, "
+            "r.row_count, r.duration_ms, r.error_code, coalesce(r.finished_at, r.started_at) AS ran_at, "
+            "count(*) OVER (PARTITION BY r.connection_id, r.sql_hash) AS times_run "
+            "FROM query_runs r LEFT JOIN connections c ON c.id = r.connection_id "
+            f"WHERE {' AND '.join(where)} "
+            "QUALIFY row_number() OVER (PARTITION BY r.connection_id, r.sql_hash "
+            "ORDER BY coalesce(r.finished_at, r.started_at) DESC NULLS LAST) = 1 "
+            "ORDER BY ran_at DESC NULLS LAST LIMIT ?")
+        params.append(max(1, min(int(limit), 200)))
+        return await self.s.fetchall(sql, params)
+
 
 class DocumentRepo(UserScopedRepo):
     """Visibility rules (DD-03): PRIVATE only for owner; shared scopes visible to all (retrieval filters further)."""
 
-    async def list(self, scope: str | None = None) -> list[dict]:
+    async def list(self, scope: str | None = None, kind: str = "REFERENCE") -> list[dict]:
         sql = ("SELECT id, owner_ref, scope, country_code, connection_id, filename, mime_type, size_bytes, status, "
-               "status_detail, chunk_count, created_at FROM documents WHERE (scope <> 'PRIVATE' OR owner_ref = ?)")
-        params: list[Any] = [self.owner]
+               "status_detail, chunk_count, created_at, coalesce(kind, 'REFERENCE') AS kind FROM documents "
+               "WHERE (scope <> 'PRIVATE' OR owner_ref = ?) AND coalesce(kind, 'REFERENCE') = ?")
+        params: list[Any] = [self.owner, kind]
         if scope:
             sql += " AND scope = ?"
             params.append(scope)
@@ -205,11 +233,13 @@ class DocumentRepo(UserScopedRepo):
             raise not_found()
         return row
 
-    async def exists_sha(self, sha: str, scope: str, country: str | None, conn: str | None) -> str | None:
+    async def exists_sha(self, sha: str, scope: str, country: str | None, conn: str | None,
+                         kind: str = "REFERENCE") -> str | None:
         r = await self.s.fetchone(
             "SELECT id FROM documents WHERE sha256 = ? AND scope = ? AND coalesce(country_code,'') = coalesce(?, '') "
-            "AND coalesce(CAST(connection_id AS VARCHAR),'') = coalesce(?, '') AND (scope <> 'PRIVATE' OR owner_ref = ?)",
-            [sha, scope, country, conn, self.owner])
+            "AND coalesce(CAST(connection_id AS VARCHAR),'') = coalesce(?, '') AND (scope <> 'PRIVATE' OR owner_ref = ?) "
+            "AND coalesce(kind, 'REFERENCE') = ?",
+            [sha, scope, country, conn, self.owner, kind])
         return str(r["id"]) if r else None
 
     async def delete(self, doc_id: str) -> dict:
@@ -229,22 +259,26 @@ class DocumentRepo(UserScopedRepo):
 # ----------------------------------------------------------------------------- retrieval (scope predicate)
 SCOPE_PREDICATE = ("(scope = 'GLOBAL' OR (scope = 'COUNTRY' AND country_code = ?) OR "
                    "(scope = 'CONNECTION' AND connection_id = ?) OR (scope = 'PRIVATE' AND owner_ref = ?))")
+# documents of one kind (REFERENCE / GUIDELINE); doc_chunks has no kind column of its own
+KIND_PREDICATE = "document_id IN (SELECT id FROM documents WHERE coalesce(kind, 'REFERENCE') = ?)"
 
 
 def knowledge_vector_search(store: AppStore, ctx: RequestContext, qvec: list[float], dim: int, country: str | None,
-                            conn: str | None, k: int) -> list[dict]:
+                            conn: str | None, k: int, kind: str = "REFERENCE") -> list[dict]:
     sql = (f"SELECT id, document_id, content, meta, array_cosine_similarity(embedding, ?::FLOAT[{int(dim)}]) AS score "
-           f"FROM doc_chunks WHERE embedding IS NOT NULL AND {SCOPE_PREDICATE} ORDER BY score DESC LIMIT ?")
-    return store.read_sync(lambda c: rows(c.execute(sql, [qvec, country, conn, ctx.user_ref, k])))
+           f"FROM doc_chunks WHERE embedding IS NOT NULL AND {SCOPE_PREDICATE} AND {KIND_PREDICATE} "
+           f"ORDER BY score DESC LIMIT ?")
+    return store.read_sync(lambda c: rows(c.execute(sql, [qvec, country, conn, ctx.user_ref, kind, k])))
 
 
 def knowledge_keyword_search(store: AppStore, ctx: RequestContext, text: str, country: str | None,
-                             conn: str | None, k: int, fts: bool) -> list[dict]:
+                             conn: str | None, k: int, fts: bool, kind: str = "REFERENCE") -> list[dict]:
     if fts:
         sql = (f"SELECT id, document_id, content, meta, score FROM (SELECT *, fts_main_doc_chunks.match_bm25(id, ?) AS score "
-               f"FROM doc_chunks) t WHERE score IS NOT NULL AND {SCOPE_PREDICATE} ORDER BY score DESC LIMIT ?")
+               f"FROM doc_chunks) t WHERE score IS NOT NULL AND {SCOPE_PREDICATE} AND {KIND_PREDICATE} "
+               f"ORDER BY score DESC LIMIT ?")
         try:
-            return store.read_sync(lambda c: rows(c.execute(sql, [text, country, conn, ctx.user_ref, k])))
+            return store.read_sync(lambda c: rows(c.execute(sql, [text, country, conn, ctx.user_ref, kind, k])))
         except Exception:  # noqa: BLE001 — index not built yet → fall back
             pass
     terms = [t for t in {w.lower() for w in text.split()} if len(t) > 3][:12]
@@ -252,8 +286,8 @@ def knowledge_keyword_search(store: AppStore, ctx: RequestContext, text: str, co
         return []
     score_expr = " + ".join("CASE WHEN content ILIKE ? THEN 1 ELSE 0 END" for _ in terms)
     sql = (f"SELECT id, document_id, content, meta, ({score_expr}) AS score FROM doc_chunks WHERE {SCOPE_PREDICATE} "
-           f"ORDER BY score DESC LIMIT ?")
-    params = [f"%{t}%" for t in terms] + [country, conn, ctx.user_ref, k]
+           f"AND {KIND_PREDICATE} ORDER BY score DESC LIMIT ?")
+    params = [f"%{t}%" for t in terms] + [country, conn, ctx.user_ref, kind, k]
     return [r for r in store.read_sync(lambda c: rows(c.execute(sql, params))) if r["score"] > 0]
 
 

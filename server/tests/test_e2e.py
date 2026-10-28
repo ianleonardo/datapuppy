@@ -292,3 +292,80 @@ def test_csv_reference_rejected(client):
     r = a.post("/api/v1/rag/documents", files={"file": ("terms.csv", b"term,meaning\nGMV,gross\n", "text/csv")},
                data={"scope": "PRIVATE"})
     assert r.status_code == 422 and r.json()["code"] == "E-RAG-001"
+
+
+def test_guidelines_for_all_and_guideline_documents(client):
+    import asyncio
+    from app.services.orchestrator import _guidelines
+    from app.services.rag import retrieve_knowledge
+    from app.store.duck import store
+    from app.store.repos import RequestContext
+    from tests.fake_llm import _vec
+
+    adm = login(client, "admin", NEW_ADMIN_PW)
+    # a guideline with no country and no database applies everywhere
+    r = adm.post("/api/v1/admin/guidelines", json={"title": "Fiscal year", "body_md": "FY starts 1 April.",
+                                                     "country_code": "", "connection_id": None})
+    assert r.status_code == 200, r.text
+    g = [x for x in adm.get("/api/v1/admin/guidelines").json()["items"] if x["title"] == "Fiscal year"][0]
+    assert g["country_code"] is None and g["connection_id"] is None
+    conn = {"id": state["cid"], "country_code": "SG"}
+    assert any("FY starts 1 April" in line for line in asyncio.run(_guidelines(store(), conn)))
+    conn_other = {"id": "00000000-0000-0000-0000-000000000000", "country_code": "MY"}
+    assert any("FY starts 1 April" in line for line in asyncio.run(_guidelines(store(), conn_other)))
+
+    # guideline documents: admin-only, never private, embedded and retrieved separately from references
+    text = b"# Refund policy\n\nRefunded payments never count as revenue. Use status SETTLED only for revenue totals.\n"
+    files = {"file": ("revenue-policy.md", text, "text/markdown")}
+    a = login(client, "alice", ANALYST_PW)
+    assert a.post("/api/v1/rag/documents", files=files, data={"scope": "PRIVATE", "kind": "GUIDELINE"}).status_code == 403
+    adm = login(client, "admin", NEW_ADMIN_PW)  # one shared test client: each login replaces the session
+    bad = adm.post("/api/v1/rag/documents", files=files, data={"scope": "PRIVATE", "kind": "GUIDELINE"})
+    assert bad.status_code == 422, bad.text
+    up = adm.post("/api/v1/rag/documents", files=files, data={"scope": "GLOBAL", "kind": "GUIDELINE"})
+    assert up.status_code == 202, up.text
+    assert wait_job(adm, up.json()["job_id"])["status"] == "SUCCEEDED"
+    gid = up.json()["id"]
+    assert [d["id"] for d in adm.get("/api/v1/rag/documents?kind=GUIDELINE").json()["items"]] == [gid]
+    a = login(client, "alice", ANALYST_PW)
+    assert gid not in [d["id"] for d in a.get("/api/v1/rag/documents").json()["items"]]  # References panel
+    assert a.get(f"/api/v1/rag/documents/{gid}/text").json()["text"].startswith("# Refund policy")
+
+    ctx_b = RequestContext(user_ref=state["bob"], user_id="bob", role="ANALYST")
+    q = "Refunded payments never count as revenue"
+    hits = asyncio.run(retrieve_knowledge(store(), ctx_b, q, _vec(q), "SG", state["cid"], kind="GUIDELINE"))
+    assert hits and hits[0]["filename"] == "revenue-policy.md"
+    refs = asyncio.run(retrieve_knowledge(store(), ctx_b, q, _vec(q), "SG", state["cid"]))
+    assert all(h["filename"] != "revenue-policy.md" for h in refs)
+
+
+def test_query_history_is_private_and_deduplicated(client):
+    a = login(client, "alice", ANALYST_PW)
+    cid = state["cid"]
+    run = lambda sql, origin="MANUAL": a.post("/api/v1/queries/execute",  # noqa: E731
+                                              json={"connection_id": cid, "sql": sql, "origin": origin,
+                                                    "confirmed_by_user": True})
+    assert run("SELECT 1 AS hist_one").status_code == 200
+    assert run("SELECT 2 AS hist_two", "AI").status_code == 200
+    assert run("SELECT 1 AS hist_one").status_code == 200          # same SQL again
+    items = a.get("/api/v1/queries/history", params={"connection_id": cid, "q": "hist_"}).json()["items"]
+    assert [i["sql_text"] for i in items] == ["SELECT 1 AS hist_one", "SELECT 2 AS hist_two"]   # newest first, deduped
+    assert items[0]["times_run"] == 2 and items[0]["status"] == "SUCCEEDED" and items[0]["connection_name"]
+    manual = a.get("/api/v1/queries/history", params={"q": "hist_", "origin": "manual"}).json()["items"]
+    assert [i["sql_text"] for i in manual] == ["SELECT 1 AS hist_one"]
+    assert a.get("/api/v1/queries/history", params={"origin": "bogus"}).status_code == 422
+    b = login(client, "bob", ANALYST_PW)
+    assert b.get("/api/v1/queries/history", params={"q": "hist_"}).json()["items"] == []
+
+
+def test_pinned_theme_survives_refresh(client):
+    a = login(client, "alice", ANALYST_PW)
+    for t in ("night", "afternoon", "morning"):
+        assert a.put("/api/v1/me/preferences", json={"pinned_theme": t}).status_code == 200
+        me = a.get("/api/v1/me").json()           # what a browser refresh loads
+        assert me["theme"] == t and me["preferences"]["pinned_theme"] == t
+    a.put("/api/v1/me/preferences", json={"pinned_theme": "night"})
+    a2 = login(client, "alice", ANALYST_PW)        # a new sign-in also starts pinned
+    assert a2.get("/api/v1/me").json()["theme"] == "night"
+    assert a2.put("/api/v1/me/preferences", json={"pinned_theme": ""}).status_code == 200   # unpin
+    assert "pinned_theme" not in a2.get("/api/v1/me").json()["preferences"]   # clock decides from next sign-in

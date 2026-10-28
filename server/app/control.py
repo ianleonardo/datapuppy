@@ -66,6 +66,15 @@ def _healthy(cfg) -> bool:
         return False
 
 
+def health(print_url: bool = False) -> int:
+    """Exit code 0 when /healthz answers on this machine (no PID file needed — works inside a container)."""
+    cfg = get_config()
+    ok = _healthy(cfg)
+    if print_url:
+        print(f"{cfg.scheme}://{cfg.host}:{cfg.port}")
+    return 0 if ok else 1
+
+
 def status() -> int:
     cfg = get_config()
     pid_file = cfg.data_dir / "run" / "sqlassist.pid"

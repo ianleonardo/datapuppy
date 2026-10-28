@@ -114,5 +114,7 @@ async def put_prefs(body: PrefsIn, ctx: RequestContext = Depends(current_ctx)) -
         elif v not in (None, ""):
             prefs[k] = v
     await s.execute("UPDATE users SET preferences = ?, updated_at = now() WHERE id = ?", [json.dumps(prefs), ctx.user_ref])
+    if patch.get("pinned_theme") in auth.THEMES:
+        await auth.set_session_theme(s, ctx.user_ref, patch["pinned_theme"])
     prefs.pop("pw_history", None)
     return {"preferences": prefs}

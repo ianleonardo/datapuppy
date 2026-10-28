@@ -116,7 +116,8 @@ def _mood(v: Any, default: str) -> str:
 # ----------------------------------------------------------------------------- shared context
 async def _guidelines(store: AppStore, conn: dict) -> list[str]:
     rows_ = await store.fetchall("SELECT title, body_md FROM guidelines WHERE is_active AND (connection_id = ? OR "
-                                 "country_code = ?) ORDER BY priority, title", [str(conn["id"]), conn["country_code"]])
+                                 "country_code = ? OR (connection_id IS NULL AND country_code IS NULL)) "
+                                 "ORDER BY priority, title", [str(conn["id"]), conn["country_code"]])
     return [f"- {r['title']}: {r['body_md']}" for r in rows_]
 
 
@@ -385,6 +386,9 @@ async def _generate(store, ctx, chats: ChatRepo, session_id, conn, prompt, artif
     cards = await retrieve_schema(store, conn_id, prompt, qvec)
     knowledge = await retrieve_knowledge(store, ctx, prompt, qvec, conn["country_code"], conn_id)
     guidelines = await _guidelines(store, conn)
+    # guideline documents (admin uploads, Admin → Guidelines): retrieved like references but treated as rules
+    guide_docs = await retrieve_knowledge(store, ctx, prompt, qvec, conn["country_code"], conn_id, kind="GUIDELINE")
+    guidelines += [f"- From guideline document {g['filename']}: {g['content']}" for g in guide_docs]
     hist = await chats.history(session_id, int(settings.get("ai.history_turns", 6)))
     cands = router.chat_candidates(store)
     if not cands:
@@ -443,6 +447,7 @@ async def _generate(store, ctx, chats: ChatRepo, session_id, conn, prompt, artif
         data, res = await _llm_json(store, messages, "GENERATE_SQL")
         sql = (data.get("sql") or "").strip()
     meta = _meta(res, {"repairs": r if sql else 0, "knowledge": [k["filename"] for k in knowledge],
+                       "guideline_documents": sorted({g["filename"] for g in guide_docs}),
                        "prompt_digest": snap["prompt_digest"], "tables_in_context": [c["table_name"] for c in cards]})
     blocks = [p(data["reply"])]
     if not sql:

@@ -81,6 +81,16 @@ async def preflight(body: PreflightIn, ctx: RequestContext = Depends(current_ctx
     return res
 
 
+@router.get("/queries/history")
+async def query_history(connection_id: str | None = None, q: str | None = None, origin: str | None = None,
+                        limit: int = 50, ctx: RequestContext = Depends(current_ctx)):
+    """SQL editor history: the caller's own executed queries (manual and AI), newest first, de-duplicated."""
+    origin = (origin or "").upper() or None
+    if origin not in (None, "MANUAL", "AI"):
+        raise ApiError("E-VAL-001", detail="origin must be MANUAL or AI")
+    return {"items": await RunRepo(store(), ctx).history(connection_id, (q or "").strip() or None, origin, limit)}
+
+
 @router.post("/queries/format")
 async def format_sql(body: FormatIn, ctx: RequestContext = Depends(current_ctx)):
     conn = await load_connection(store(), ctx, body.connection_id)

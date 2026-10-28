@@ -3,11 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, del, get, patch, post, postSSE } from '../../api/client';
 import { useApp } from '../../app/store';
 import { useExec } from '../../lib/exec';
+import { Icon, IconButton } from '../../lib/icons';
+import { speechSupported, useSpeech } from '../../lib/speech';
 import { copyText, toastError } from '../../lib/toast';
 import { Mascot } from '../../mascot/Mascot';
 import { useMood } from '../../mascot/moodStore';
 import { THEMES, pickGreeting } from '../../theme/themes';
-import { blocksToMarkdown, BlockView, type Block } from './Blocks';
+import { blocksToMarkdown, blocksToSpeech, BlockView, type Block } from './Blocks';
 
 interface Msg {
   id: string;
@@ -74,6 +76,9 @@ export function ChatPanel() {
       })
       .catch(() => setSessionId(null));
   }, [sessionId, setConnectionId, setSessionId]);
+
+  // stop reading aloud when switching conversations or leaving the chat
+  useEffect(() => () => useSpeech.getState().stop(), [sessionId]);
 
   useEffect(() => {
     if (composer) {
@@ -285,9 +290,11 @@ export function ChatPanel() {
         </DropdownMenu.Root>
         <DropdownMenu.Root onOpenChange={(o) => o && refreshSessions(search)}>
           <DropdownMenu.Trigger asChild>
-            <button className="btn btn-sm" aria-label="Chat history">
-              History
-            </button>
+            <IconButton
+              label="Chat history"
+              icon={<Icon.history />}
+              className="ibtn-tip-end ibtn-boxed"
+            />
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content className="dd-content sessions-dd" align="end" sideOffset={6}>
@@ -352,6 +359,33 @@ export function ChatPanel() {
               <p>{greeting}</p>
               {!conn && <p className="muted">Pick a database at the top right to get started.</p>}
             </div>
+            {starters.length > 0 && (
+              <div className="starters starters-welcome" aria-label="Starter prompts">
+                {starters.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    className="chip"
+                    title={s.prompt}
+                    onClick={() => {
+                      if (s.intent === 'REVIEW_SQL') {
+                        setText(s.prompt + '\n```sql\n\n```');
+                        inputRef.current?.focus();
+                      } else
+                        send(
+                          s.prompt,
+                          s.intent,
+                          s.intent === 'INTERPRET_RESULT'
+                            ? useApp.getState().result?.run_id
+                            : undefined,
+                        );
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {messages.map((m) =>
@@ -399,26 +433,28 @@ export function ChatPanel() {
                 ))}
                 {!m.streaming && (
                   <div className="msg-tools">
-                    <button
-                      className="btn btn-sm btn-ghost"
+                    <IconButton
+                      label="Copy reply"
+                      icon={<Icon.copy />}
                       onClick={() => copyText(blocksToMarkdown(m.content), 'Message copied')}
-                    >
-                      Copy
-                    </button>
-                    <button
-                      className={`btn btn-sm btn-ghost ${m.feedback === 1 ? 'on' : ''}`}
-                      aria-label="Helpful"
+                    />
+                    {speechSupported && (
+                      <ReadAloud id={m.id} text={() => blocksToSpeech(m.content)} />
+                    )}
+                    <IconButton
+                      label="Helpful"
+                      icon={<Icon.thumbUp />}
+                      className={m.feedback === 1 ? 'on' : ''}
+                      aria-pressed={m.feedback === 1}
                       onClick={() => feedback(m, 1)}
-                    >
-                      👍
-                    </button>
-                    <button
-                      className={`btn btn-sm btn-ghost ${m.feedback === -1 ? 'on' : ''}`}
-                      aria-label="Not helpful"
+                    />
+                    <IconButton
+                      label="Not helpful"
+                      icon={<Icon.thumbDown />}
+                      className={m.feedback === -1 ? 'on' : ''}
+                      aria-pressed={m.feedback === -1}
                       onClick={() => feedback(m, -1)}
-                    >
-                      👎
-                    </button>
+                    />
                   </div>
                 )}
               </div>
@@ -468,31 +504,9 @@ export function ChatPanel() {
             aria-label="Message"
           />
           <div className="composer-row">
-            <div className="starters">
-              {starters.map((s) => (
-                <button
-                  type="button"
-                  key={s.id}
-                  className="chip"
-                  title={s.prompt}
-                  onClick={() => {
-                    if (s.intent === 'REVIEW_SQL') {
-                      setText(s.prompt + '\n```sql\n\n```');
-                      inputRef.current?.focus();
-                    } else
-                      send(
-                        s.prompt,
-                        s.intent,
-                        s.intent === 'INTERPRET_RESULT'
-                          ? useApp.getState().result?.run_id
-                          : undefined,
-                      );
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            <span className="composer-hint muted small">
+              Enter to send · Shift+Enter for a new line
+            </span>
             {busy ? (
               <button
                 type="button"
@@ -524,5 +538,21 @@ export function ChatPanel() {
         </form>
       </div>
     </div>
+  );
+}
+
+/** Read a reply aloud (browser speech); the same button stops it. Only one reply speaks at a time. */
+function ReadAloud({ id, text }: { id: string; text: () => string }) {
+  const speaking = useSpeech((s) => s.speakingId === id);
+  return (
+    <IconButton
+      label={speaking ? 'Stop reading' : 'Read aloud'}
+      icon={speaking ? <Icon.stop /> : <Icon.speaker />}
+      className={speaking ? 'on' : ''}
+      aria-pressed={speaking}
+      onClick={() =>
+        speaking ? useSpeech.getState().stop() : useSpeech.getState().speak(id, text())
+      }
+    />
   );
 }

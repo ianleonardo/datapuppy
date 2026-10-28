@@ -90,6 +90,15 @@ class SessionCache:
 sessions = SessionCache()
 
 
+async def set_session_theme(store, user_ref: str, theme: str) -> None:
+    """A pinned theme applies at once to every open session of the user (and survives a page refresh)."""
+    await store.execute("UPDATE auth_sessions SET theme = ? WHERE user_ref = ?", [theme, user_ref])
+    with sessions._lock:
+        for s in sessions._c.values():
+            if s.user_ref == user_ref:
+                s.theme = theme
+
+
 async def create_session(store: AppStore, user: dict, tz: str | None, ip: str | None, ua: str | None) -> tuple[str, str, str]:
     token = secrets.token_urlsafe(32)  # 256-bit
     csrf = secrets.token_urlsafe(24)

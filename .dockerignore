@@ -1,0 +1,23 @@
+# Build context is the repository root; only server/, config/sqlassist.example.toml and docker/ are used.
+# Never send secrets or runtime data to the Docker daemon.
+data/
+config/sqlassist.toml
+config/master.key
+config/*.pem
+config/*.key
+config/*.crt
+docker/images/
+docker/docker.conf
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+server/tests/
+web/
+specs/
+wheels/
+extensions/
+*.tar
+*.tar.gz
+.git/

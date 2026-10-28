@@ -1,0 +1,253 @@
+/* Reference / guideline document viewer and file-type icons (used in the workspace and in Admin). */
+.ref-ico {
+  width: 14px;
+  height: 16px;
+  border-radius: 3px;
+  background: #9aa5b1;
+  display: inline-block;
+  flex: none;
+  position: relative;
+}
+.ref-ico.ext-pdf {
+  background: #e5484d;
+}
+.ref-ico.ext-csv {
+  background: #35b864;
+}
+.ref-ico.ext-docx {
+  background: #2f6fc2;
+}
+.ref-ico.ext-txt {
+  background: #9aa5b1;
+}
+
+/* ---------- drop zone + document list (References panel, Admin → Guidelines) ---------- */
+.dropzone {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  border: 2px dashed var(--line-soft);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.dropzone.drag {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone p {
+  margin: 2px 0 0;
+}
+.dz-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.doclist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.doc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 10px;
+}
+.doc:hover {
+  background: var(--surface-2);
+}
+.doc-name {
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- reference document viewer (RagPanel → DocViewer) ---------- */
+.ref-ico.ext-md,
+.ref-ico.ext-markdown {
+  background: #7a5af0;
+}
+.doc-open {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.doc-open:hover,
+.doc-open:focus-visible {
+  color: var(--accent-ink);
+  text-decoration: underline;
+}
+.modal.docv {
+  max-width: min(980px, 94vw);
+  height: min(86vh, 900px);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px;
+  gap: 10px;
+}
+.docv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.docv-head h3 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font: 600 20px var(--font-display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.docv-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.docv-seg {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1.5px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 2px;
+}
+.docv-seg button {
+  border: 0;
+  background: none;
+  font: 700 13px var(--font-body);
+  color: var(--ink-2);
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.docv-seg button.on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 0 var(--line-soft);
+}
+.docv-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1.5px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.docv-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  border-radius: 12px;
+  background: #fff;
+}
+.docv-text {
+  margin: 0;
+  padding: 14px 16px;
+  font: 13px/1.55 var(--font-mono);
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.docv-md {
+  padding: 16px 22px;
+  font: 15px/1.6 var(--font-body);
+  color: var(--ink);
+  max-width: 78ch;
+}
+.docv-md h1,
+.docv-md h2,
+.docv-md h3,
+.docv-md h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1.2em 0 0.5em;
+}
+.docv-md h1 {
+  font-size: 1.7em;
+  margin-top: 0.2em;
+}
+.docv-md h2 {
+  font-size: 1.35em;
+  padding-bottom: 4px;
+  border-bottom: 1.5px solid var(--line-soft);
+}
+.docv-md h3 {
+  font-size: 1.15em;
+}
+.docv-md a {
+  color: var(--accent-ink);
+}
+.docv-md code {
+  font: 0.88em var(--font-mono);
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.docv-md pre {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 12px 14px;
+  border-radius: 10px;
+  overflow: auto;
+}
+.docv-md pre code {
+  background: none;
+  padding: 0;
+}
+.docv-md blockquote {
+  margin: 0.8em 0;
+  padding: 4px 14px;
+  border-left: 4px solid var(--accent);
+  color: var(--ink-2);
+  background: var(--surface);
+  border-radius: 0 8px 8px 0;
+}
+.docv-md table {
+  border-collapse: collapse;
+  font-size: 14px;
+  margin: 0.6em 0;
+}
+.docv-md th,
+.docv-md td {
+  border: 1px solid var(--line-soft);
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.docv-md th {
+  background: var(--surface-3);
+  font-weight: 800;
+  position: sticky;
+  top: 0;
+}
+.docv-md tr:nth-child(even) td {
+  background: var(--surface);
+}
+.docv-md img {
+  max-width: 100%;
+}
+.docv-md hr {
+  border: 0;
+  border-top: 1.5px solid var(--line-soft);
+}

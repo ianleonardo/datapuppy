@@ -114,6 +114,42 @@ Follow TS §24. In short: `scripts/build-release.sh` on a build machine with `vp
 
 The master key is generated at `config/master.key` (outside `data_dir`). Back it up separately from data backups.
 
+## Docker (linux/amd64)
+
+Scripts: `scripts/docker-build|docker-start|docker-stop` as `.sh` (Linux/macOS) and `.cmd` (Windows, plain batch).
+Settings live in `docker/docker.conf`; copy `docker/docker.example.conf` to start. Environment variables with the
+same names override the file, and command-line options override both.
+
+```bash
+scripts/docker-build.sh                 # builds sqlassist:<stamp> + :latest for linux/amd64, saves docker/images/sqlassist-<stamp>-linux-amd64.tar.gz
+scripts/docker-build.sh --rebuild-web   # run `vp build` first (otherwise the UI already in server/app/static is used)
+scripts/docker-start.sh                 # loads a newer image file if there is one, (re)creates the container, waits until healthy
+scripts/docker-start.sh --data-dir /srv/sqlassist/data --port 8443 --bind 0.0.0.0
+scripts/docker-stop.sh                  # graceful stop (DuckDB checkpoint); --remove also deletes the container
+```
+
+- **Image files and updates.** Each build saves an image file named with its build stamp (UTC). The stamp is
+  also stored in the image as a label. To update another machine, copy the new file into its `docker/images` folder
+  and run the start script. It loads the file only when the file's stamp is newer than the image Docker already has.
+  It then replaces the container, because the container was made from the older image. Data and config stay on the host.
+- **Data and config.** `DATA_DIR` (default `./data`) is mounted read-write at `/data`, so the DuckDB store, uploads,
+  exports, logs and backups are host files. `CONFIG_DIR` (default `./config`) is mounted at `/app/config` and holds
+  `sqlassist.toml`, `master.key` and TLS files. In `sqlassist.toml`, refer to cert/key files as `./config/<file>`.
+  Inside the container, the data folder, log folder, key path, host (0.0.0.0) and port (8080) are fixed by
+  environment variables. Use `HOST_BIND` / `HOST_PORT` to choose where it is published.
+- **Permissions.** Every file baked into the image is read/write for all users (`chmod -R a+rwX`), so the image runs
+  under any user ID. On Linux/macOS the start script runs the container as your own `uid:gid` (`RUN_AS=auto`). Files it
+  writes into `DATA_DIR` therefore stay owned by you and remain readable and writable from the host. Set
+  `RUN_AS=uid:gid` to use another owner. On startup the entrypoint checks that `/data` is writable and says which
+  user lacks access if it isn't.
+- **Offline extras.** The build bundles DuckDB `fts`/`vss` (when extensions.duckdb.org is reachable). They are copied
+  into `{data}/extensions` on first start. Optional drivers: `DRIVERS=oracledb mariadb`.
+- **Proxies / private mirrors.** `HTTP(S)_PROXY` from your shell are passed to the build. Use `PIP_INDEX_URL`
+  for an internal PyPI, and `BASE_IMAGE` if Docker Hub is not reachable (any Debian/Ubuntu image with Python 3.12
+  and `python3 -m venv`).
+- Don't run the Docker container and a host install (`scripts/start.sh`) on the same data folder at the same time.
+  DuckDB allows only one writer.
+
 ## Where this deviates from the spec
 
 - **Windows scripts are plain batch.** TS Appendix F specifies PowerShell (`start.ps1`/`stop.ps1`). Here `start.cmd`, `stop.cmd` and `status.cmd` are plain batch files that call `python -m app.cli start|stop|status`, which does the same job: PID check, detached start, health polling, graceful shutdown via `/internal/shutdown`, then a forced-stop fallback.

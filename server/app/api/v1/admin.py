@@ -255,6 +255,13 @@ class GuidelineIn(BaseModel):
     is_active: bool = True
 
 
+def _norm_target(body: GuidelineIn) -> None:
+    body.country_code = (body.country_code or "").strip().upper() or None
+    body.connection_id = (body.connection_id or "").strip() or None
+    if body.connection_id:
+        body.country_code = None
+
+
 @router.get("/guidelines")
 async def guidelines(ctx: RequestContext = Depends(admin_ctx)):
     return {"items": await store().fetchall("SELECT * FROM guidelines ORDER BY priority, title")}
@@ -262,8 +269,7 @@ async def guidelines(ctx: RequestContext = Depends(admin_ctx)):
 
 @router.post("/guidelines")
 async def create_guideline(body: GuidelineIn, ctx: RequestContext = Depends(admin_ctx)):
-    if not body.country_code and not body.connection_id:
-        raise ApiError("E-VAL-001", detail="Attach the guideline to a country or a connection")
+    _norm_target(body)  # neither country nor connection = applies to every country and database
     gid = str(uuid.uuid4())
     await store().execute("INSERT INTO guidelines VALUES (?,?,?,?,?,?,?)",
                           [gid, body.country_code, body.connection_id, body.title, body.body_md, body.priority, body.is_active])
@@ -273,6 +279,7 @@ async def create_guideline(body: GuidelineIn, ctx: RequestContext = Depends(admi
 
 @router.put("/guidelines/{gid}")
 async def update_guideline(gid: str, body: GuidelineIn, ctx: RequestContext = Depends(admin_ctx)):
+    _norm_target(body)
     await store().execute("UPDATE guidelines SET country_code=?, connection_id=?, title=?, body_md=?, priority=?, is_active=? "
                           "WHERE id = ?", [body.country_code, body.connection_id, body.title, body.body_md, body.priority,
                                            body.is_active, gid])

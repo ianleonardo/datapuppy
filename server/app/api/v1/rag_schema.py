@@ -25,10 +25,19 @@ router = APIRouter(tags=["rag", "schema"])
 
 @router.post("/rag/documents")
 async def upload(file: UploadFile = File(...), scope: str = Form("PRIVATE"), country_code: str | None = Form(None),
-                 connection_id: str | None = Form(None), ctx: RequestContext = Depends(current_ctx)):
+                 connection_id: str | None = Form(None), kind: str = Form("REFERENCE"),
+                 ctx: RequestContext = Depends(current_ctx)):
     limit("upload", ctx.user_ref, per_hour=settings.get("ratelimit.uploads_per_hour", 20))
     s = store()
     scope = scope.upper()
+    kind = (kind or "REFERENCE").upper()
+    if kind not in ("REFERENCE", "GUIDELINE"):
+        raise ApiError("E-VAL-001", detail="Invalid kind")
+    if kind == "GUIDELINE":  # guideline documents are admin-authored rules, never private
+        if not ctx.is_admin:
+            raise ApiError("E-AUTH-002")
+        if scope == "PRIVATE":
+            raise ApiError("E-VAL-001", detail="Guideline documents apply to everyone, a country or a database")
     if scope not in ("GLOBAL", "COUNTRY", "CONNECTION", "PRIVATE"):
         raise ApiError("E-VAL-001", detail="Invalid scope")
     if scope != "PRIVATE" and not ctx.is_admin:
@@ -43,7 +52,7 @@ async def upload(file: UploadFile = File(...), scope: str = Form("PRIVATE"), cou
         connection_id = None
     filename = Path(file.filename or "upload").name
     ext = Path(filename).suffix.lower()
-    ctx_audit = {"filename": filename, "scope": scope}
+    ctx_audit = {"filename": filename, "scope": scope, "kind": kind}
 
     async def reject(code: str, **extra):
         await audit.record(s, action="DOCUMENT_UPLOAD", status="FAILED", user_ref=ctx.user_ref, user_id=ctx.user_id,
@@ -76,7 +85,7 @@ async def upload(file: UploadFile = File(...), scope: str = Form("PRIVATE"), cou
         await reject("E-RAG-003")
     digest = sha.hexdigest()
     repo = DocumentRepo(s, ctx)
-    dup = await repo.exists_sha(digest, scope, country_code, connection_id)
+    dup = await repo.exists_sha(digest, scope, country_code, connection_id, kind)
     if dup:
         dest.unlink(missing_ok=True)
         await audit.record(s, action="DOCUMENT_UPLOAD", status="FAILED", user_ref=ctx.user_ref, user_id=ctx.user_id,
@@ -84,9 +93,9 @@ async def upload(file: UploadFile = File(...), scope: str = Form("PRIVATE"), cou
         raise ApiError("E-RAG-004", existing_id=dup, reindex_offer=True)
     doc_id = str(uuid.uuid4())
     await s.execute("INSERT INTO documents(id, owner_ref, scope, country_code, connection_id, filename, mime_type, size_bytes, "
-                    "sha256, file_path, status) VALUES (?,?,?,?,?,?,?,?,?,?, 'UPLOADED')",
+                    "sha256, file_path, status, kind) VALUES (?,?,?,?,?,?,?,?,?,?, 'UPLOADED', ?)",
                     [doc_id, ctx.user_ref, scope, country_code, connection_id, filename, rag.ALLOWED[ext], size, digest,
-                     str(rel).replace("\\", "/")])
+                     str(rel).replace("\\", "/"), kind])
     await audit.record(s, action="DOCUMENT_UPLOAD", user_ref=ctx.user_ref, user_id=ctx.user_id,
                        context={**ctx_audit, "document_id": doc_id, "size_bytes": size, "sha256": digest})
     jid = await runner().enqueue("ingest_document", {"document_id": doc_id}, ctx.user_ref, idempotency_key=f"ingest:{doc_id}")
@@ -94,8 +103,11 @@ async def upload(file: UploadFile = File(...), scope: str = Form("PRIVATE"), cou
 
 
 @router.get("/rag/documents")
-async def list_docs(scope: str | None = None, ctx: RequestContext = Depends(current_ctx)):
-    return {"items": await DocumentRepo(store(), ctx).list(scope)}
+async def list_docs(scope: str | None = None, kind: str = "REFERENCE", ctx: RequestContext = Depends(current_ctx)):
+    kind = kind.upper()
+    if kind not in ("REFERENCE", "GUIDELINE"):
+        raise ApiError("E-VAL-001", detail="Invalid kind")
+    return {"items": await DocumentRepo(store(), ctx).list(scope, kind)}
 
 
 @router.get("/rag/documents/{doc_id}")

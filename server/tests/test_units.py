@@ -180,3 +180,92 @@ def test_chunking():
     text = "\n\n".join(f"Paragraph {i}. " + "word " * 200 for i in range(10))
     ch = chunk([{"text": text, "meta": {}}], 300, 50)
     assert len(ch) > 3 and all(c["tokens"] <= 400 for c in ch)
+
+
+# ---------------------------------------------------------------- unknown names → similar suggestions (SQL editor)
+NAME_CAT = {"orders": {"order_id", "customer_id", "order_date", "status"},
+            "customers": {"customer_id", "name", "country_code"},
+            "payments": {"payment_id", "order_id", "amount", "status"},
+            "order_items": {"order_id", "line_no", "quantity"}}
+
+
+def _unknown(sql):
+    from app.services.safeguards import static_preflight
+    r = static_preflight(sql, "DUCKDB", NAME_CAT, set())
+    return {i["token"]: i["suggestions"] for i in r["issues"] if i["code"].startswith("UNKNOWN") and "token" in i}, r
+
+
+def test_suggests_similar_table_and_columns():
+    found, r = _unknown("SELECT ordr_id, statu FROM orderz WHERE statu = 'statu'")
+    assert found["orderz"][0] == "orders"
+    assert found["ordr_id"][0] == "order_id" and found["statu"][0] == "status"
+    assert sum(1 for i in r["issues"] if i.get("token") == "statu") == 1          # reported once
+    assert r["corrected_sql"] == "SELECT order_id, status FROM orders WHERE status = 'statu'"  # literal untouched
+
+
+def test_suggests_plural_and_qualified_columns():
+    found, r = _unknown("SELECT o.orderid, c.nam FROM orders o JOIN customer c ON c.customer_id = o.customer_id")
+    assert found["customer"] == ["customers"]
+    assert found["orderid"][0] == "order_id" and found["nam"] == ["name"]
+    assert "JOIN customers c" in r["corrected_sql"] and "o.order_id" in r["corrected_sql"]
+
+
+def test_ambiguous_or_weak_matches_are_only_suggested():
+    found, r = _unknown("SELECT amt FROM payments")
+    assert found["amt"] == ["amount"] and r["corrected_sql"] is None              # suggested, not auto-applied
+    found, r = _unknown("SELECT zzz FROM payments")
+    assert "zzz" not in found and r["ok"] is False                               # nothing similar: plain error
+
+
+def test_excluded_tables_are_not_suggested():
+    from app.services.safeguards import static_preflight
+    r = static_preflight("SELECT 1 FROM order", "DUCKDB", NAME_CAT, {"orders"})
+    sugg = [i for i in r["issues"] if i["code"] == "UNKNOWN_TABLE"][0].get("suggestions", [])
+    assert "orders" not in sugg
+
+
+def test_similar_names_proposals():
+    from app.services.safeguards import similar_names, static_preflight
+    cols = ["customer_id", "customer_name", "email", "phone", "country_code", "segment", "signup_date"]
+    best = lambda w: (similar_names(w, cols) or [("", 0)])[0][0]  # noqa: E731
+    assert best("emial") == "email" and best("segmnt") == "segment"
+    assert best("name") == "customer_name" and best("nme") == "customer_name"
+    assert best("id") == "customer_id" and best("date") == "signup_date"
+    assert similar_names("xyz", cols) == []
+    cat = {"users": {"id", "name", "email"}, "orders": {"id", "user_id", "amount"}, "order_items": {"order_id"}}
+    for engine in ("DUCKDB", "POSTGRES", "ORACLE", "MARIADB"):
+        r = static_preflight("SELECT u.nam FROM user u", engine, cat, set())
+        tables = [i for i in r["issues"] if i["code"] == "UNKNOWN_TABLE"]
+        assert tables and tables[0]["suggestions"][0] == "users" and "Did you mean users?" in tables[0]["message"]
+        assert r["corrected_sql"] == "SELECT u.name FROM users u"
+    # a whole-name match always outranks a part match
+    assert similar_names("order", ["orders", "order_items"])[0][0] == "orders"
+
+
+def test_keyword_typos_are_proposed():
+    from app.services.safeguards import static_preflight
+    cat = {"project_documents": {"id", "project", "title"}, "projects": {"id", "name"}}
+
+    def run(sql):
+        r = static_preflight(sql, "DUCKDB", cat, set())
+        return {i["token"]: i["suggestions"] for i in r["issues"] if i["code"] in ("KEYWORD_TYPO", "BARE_AGGREGATE")}, r
+
+    found, r = run("select count from project_documents were project = ''")
+    assert found == {"were": ["where"], "count": ["count(*)"]}
+    assert r["corrected_sql"] == "select count(*) from project_documents where project = ''"
+    were = [i for i in r["issues"] if i.get("token") == "were"][0]
+    assert (were["line"], were["col"], were["end_col"]) == (1, 37, 41)
+    for bad, word, kw in [("selct * from projects", "selct", "select"), ("SELECT * FORM projects", "FORM", "FROM"),
+                          ("select name from projects oder by name", "oder", "order"),
+                          ("select name from projects grup by name", "grup", "group"),
+                          ("select name from projects order bye name", "bye", "by")]:
+        found, _ = run(bad)
+        assert found.get(word) == [kw], (bad, found)
+    # a valid statement is never "corrected": an alias that resembles a keyword stays an alias
+    found, r = run("SELECT p.name FROM projects oder JOIN project_documents p ON p.id = oder.id")
+    assert "oder" not in found
+    # keyword and name mistakes together, positions mapped back to the original text
+    _, r = run("select nme from projcts were id = 1")
+    codes = {i["code"]: i["col"] for i in r["issues"]}
+    assert codes["KEYWORD_TYPO"] == 25 and codes["UNKNOWN_TABLE"] == 17 and codes["UNKNOWN_COLUMN"] == 8
+    assert r["corrected_sql"] == "select name from projects where id = 1"

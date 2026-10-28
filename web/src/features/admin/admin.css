@@ -409,3 +409,21 @@
     display: none;
   }
 }
+
+/* Admin → Guidelines: guideline documents */
+.gdocs {
+  margin-top: 22px;
+  display: grid;
+  gap: 10px;
+}
+.gdocs-title {
+  margin: 0;
+  font: 600 18px var(--font-display);
+}
+.gdocs > p {
+  margin: 0;
+  max-width: 760px;
+}
+.gdocs-card {
+  padding: 6px;
+}

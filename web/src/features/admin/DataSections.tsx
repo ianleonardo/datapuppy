@@ -1,4 +1,5 @@
 import { Select } from '../../lib/Select';
+import { GuidelineDocs } from './GuidelineDocs';
 import { useState } from 'react';
 import { api, del, post, put } from '../../api/client';
 import { toast } from '../../lib/toast';
@@ -444,11 +445,13 @@ export function GuidelinesSection() {
   const target = (x: any) =>
     x.connection_id
       ? (conns.data?.items.find((c: any) => c.id === x.connection_id)?.name ?? 'connection')
-      : `Country ${x.country_code}`;
+      : x.country_code
+        ? `Country ${x.country_code}`
+        : 'All countries and databases';
   return (
     <Section
       title="Guidelines"
-      intro="Short, authoritative rules the AI always follows for a country or database, such as fiscal-year definitions or which status counts as revenue."
+      intro="Short, authoritative rules the AI always follows, for every country and database or for one of them, such as fiscal-year definitions or which status counts as revenue. Longer policies can be uploaded as guideline documents below."
       actions={
         <button
           className="btn btn-primary"
@@ -458,7 +461,7 @@ export function GuidelinesSection() {
               body_md: '',
               priority: 100,
               is_active: true,
-              country_code: 'SG',
+              country_code: null,
               connection_id: null,
             })
           }
@@ -496,6 +499,7 @@ export function GuidelinesSection() {
           </Card>
         ))}
       </div>
+      <GuidelineDocs countries={countries.data?.items ?? []} conns={conns.data?.items ?? []} />
       {edit && (
         <Modal
           title={edit.id ? 'Edit guideline' : 'Add guideline'}
@@ -513,7 +517,13 @@ export function GuidelinesSection() {
             <Field label="Applies to">
               <Select
                 className="select"
-                value={edit.connection_id ? `c:${edit.connection_id}` : `k:${edit.country_code}`}
+                value={
+                  edit.connection_id
+                    ? `c:${edit.connection_id}`
+                    : edit.country_code
+                      ? `k:${edit.country_code}`
+                      : 'all:'
+                }
                 onChange={(e) => {
                   const [t, v] = e.target.value.split(':');
                   setEdit({
@@ -523,6 +533,7 @@ export function GuidelinesSection() {
                   });
                 }}
               >
+                <option value="all:">All countries and databases</option>
                 {countries.data?.items.map((k: any) => (
                   <option key={k.code} value={`k:${k.code}`}>
                     Country {k.name}
