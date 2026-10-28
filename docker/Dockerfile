@@ -10,6 +10,16 @@
 # host user's UID (docker run --user) without hitting read-only files.
 
 ARG BASE_IMAGE=python:3.12-slim-bookworm
+
+# Source stage: the files from the build context. Files created on macOS carry extended attributes
+# (com.apple.provenance, com.apple.quarantine …); Docker would store them in the image layer and `docker load`
+# then fails with "lsetxattr … operation not supported". Nothing from this stage is copied into the final image
+# with COPY; the final stage copies with a plain `cp`, which drops extended attributes.
+FROM scratch AS src
+COPY server/ /server/
+COPY config/sqlassist.example.toml /config/sqlassist.example.toml
+COPY docker/entrypoint.sh /entrypoint.sh
+
 FROM --platform=linux/amd64 ${BASE_IMAGE}
 
 # Space-separated optional database drivers: "oracledb", "mariadb" (psycopg for PostgreSQL is always included).
@@ -46,21 +56,21 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends $pkgs; \
     rm -rf /var/lib/apt/lists/*
 
-COPY server/requirements.lock /tmp/requirements.lock
-RUN set -eux; \
+RUN --mount=type=bind,from=src,source=/server/requirements.lock,target=/src/requirements.lock \
+    set -eux; \
     PY=$(command -v python3.12 || command -v python3); \
     "$PY" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'; \
     "$PY" -m venv /opt/venv; \
     if [ -n "$PIP_INDEX_URL" ]; then export PIP_INDEX_URL; fi; \
     if [ -n "$PIP_TRUSTED_HOST" ]; then export PIP_TRUSTED_HOST; fi; \
     pip install --upgrade pip; \
-    pip install -r /tmp/requirements.lock; \
+    pip install -r /src/requirements.lock; \
     extra=""; \
     case " $DRIVERS " in *" oracledb "*) extra="$extra oracledb>=2.4";; esac; \
     case " $DRIVERS " in *" mariadb "*) extra="$extra mariadb>=1.1";; esac; \
     if [ -n "$extra" ]; then pip install $extra; fi; \
     case " $DRIVERS " in *" mariadb "*) apt-get purge -y --auto-remove gcc libmariadb-dev || true;; esac; \
-    rm -f /tmp/requirements.lock
+    true
 
 # DuckDB fts / vss extensions for offline use (DD-14). Seeded into /data/extensions on first start.
 # Best effort: without network access to extensions.duckdb.org the app still runs (keyword/vector fallbacks).
@@ -68,9 +78,12 @@ RUN mkdir -p /opt/sqlassist/duckdb-extensions && \
     python3 -c "import duckdb; c = duckdb.connect(); c.execute(\"SET extension_directory = '/opt/sqlassist/duckdb-extensions'\"); [c.execute('INSTALL ' + e) for e in ('fts', 'vss')]; print('duckdb extensions bundled')" \
     || echo "WARNING: DuckDB fts/vss extensions could not be downloaded; the app will use its fallbacks."
 
-COPY server/ /app/server/
-COPY config/sqlassist.example.toml /app/config.defaults/sqlassist.example.toml
-COPY docker/entrypoint.sh /usr/local/bin/sqlassist-entrypoint
+RUN --mount=type=bind,from=src,target=/src \
+    set -eux; \
+    mkdir -p /app/server /app/config.defaults; \
+    cp -r /src/server/. /app/server/; \
+    cp /src/config/sqlassist.example.toml /app/config.defaults/sqlassist.example.toml; \
+    cp /src/entrypoint.sh /usr/local/bin/sqlassist-entrypoint
 
 # Permissions: everything the app may touch is read/write for every user ID (rwX keeps dirs/executables
 # traversable); the virtualenv is read/execute for everyone.

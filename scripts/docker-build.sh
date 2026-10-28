@@ -37,6 +37,11 @@ fi
 [[ -f "$ROOT/server/app/static/index.html" ]] || {
   echo "ERROR: server/app/static/index.html is missing. Run with --rebuild-web (needs vp) first." >&2; exit 1; }
 
+# macOS tags files with extended attributes (com.apple.provenance …); clear them so they never reach the image.
+if [[ "$(uname -s)" == "Darwin" ]] && command -v xattr >/dev/null 2>&1; then
+  xattr -cr "$ROOT/server" "$ROOT/config" "$ROOT/docker" 2>/dev/null || true
+fi
+
 echo "==> Building image $IMAGE_NAME:$STAMP for linux/amd64"
 ARGS=(--platform linux/amd64 -f "$ROOT/docker/Dockerfile"
       -t "$IMAGE_NAME:$STAMP" -t "$IMAGE_NAME:latest"
