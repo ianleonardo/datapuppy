@@ -106,49 +106,214 @@ append-only outside purge).
 
 ## Production install
 
-Follow TS §24. In short: `scripts/build-release.sh` on a build machine with `vp` installed (web build, wheels, DuckDB
-`fts`/`vss` extensions), extract on the host, `pip install --no-index --find-links wheels -r server/requirements.lock`
+Follow TS §24. In short: `scripts/build-release.sh --platform manylinux2014_x86_64` (Linux server; `win_amd64` for
+Windows; without `--platform` the wheels are for the build machine itself) on a build machine with `vp` installed (web
+build, wheels for glibc 2.28+ — use `--glibc 2.17` for older servers — and DuckDB `fts`/`vss` extensions), extract on the host, `pip install --no-index --find-links wheels -r server/requirements.lock`
 (+ `requirements-drivers.txt` as needed), copy extensions to `{data_dir}/extensions`, configure
 `config/sqlassist.toml`, `scripts/start.sh` / `scripts\start.cmd`. Use `scripts/sqlassist.service`
 (systemd) on Linux. On Windows, register `scripts\start.cmd --foreground` with Task Scheduler ("At startup") or NSSM, and use `scripts\stop.cmd` to stop. CLI: `python -m app.cli start|stop|status|paths|create-admin|rotate-master-key|backup|verify-audit|doctor|seed-demo`.
 
 The master key is generated at `config/master.key` (outside `data_dir`). Back it up separately from data backups.
 
-## Docker (linux/amd64)
+## Docker
 
-Scripts: `scripts/docker-build|docker-start|docker-stop` as `.sh` (Linux/macOS) and `.cmd` (Windows, plain batch).
-Settings live in `docker/docker.conf`; copy `docker/docker.example.conf` to start. Environment variables with the
-same names override the file, and command-line options override both.
+Runs the whole app (server + web UI) in one Linux x86-64 container. Your data and configuration stay in normal
+folders on the host, so you can rebuild, update or remove the container without losing anything.
+
+Every command has a Linux/macOS version (`.sh`, run in Terminal) and a Windows version (`.cmd`, run in Command Prompt
+or by double-clicking). Run them from the project folder.
+
+| Step | Linux / macOS | Windows |
+|---|---|---|
+| Build the image | `scripts/docker-build.sh` | `scripts\docker-build.cmd` |
+| Start (loads a newer image file automatically) | `scripts/docker-start.sh` | `scripts\docker-start.cmd` |
+| Stop | `scripts/docker-stop.sh` | `scripts\docker-stop.cmd` |
+
+### 1. Before you start
+
+- **Docker:** Docker Desktop on macOS or Windows, Docker Engine on Linux. Check it's running with `docker info`.
+- **Apple Silicon Macs:** the image is built for x86-64 and runs under emulation. In Docker Desktop → Settings →
+  General, turn on **Use Rosetta for x86_64/amd64 emulation on Apple Silicon** for faster builds and runs.
+- **Network for the build:** the build downloads the base image from Docker Hub and Python packages from PyPI. Behind
+  a corporate proxy or with internal mirrors, see [Troubleshooting](#docker-troubleshooting).
+- **`vp`:** only needed if you rebuild the web UI as part of the build (`--rebuild-web`). Otherwise the already-built
+  UI in `server/app/static` is used.
+
+### 2. One-time setup
+
+1. **Docker settings:** copy the example and edit it.
+
+   ```bash
+   cp docker/docker.example.conf docker/docker.conf        # Windows: copy docker\docker.example.conf docker\docker.conf
+   ```
+
+   The defaults run the app at `http://127.0.0.1:8080`, keep data in `./data` and config in `./config`. All settings
+   are listed in [Settings](#docker-settings).
+
+2. **App config:** `config/sqlassist.toml` is the same file a normal install uses. If it doesn't exist, the start
+   script creates it from the example. Check these lines:
+
+   ```toml
+   [server]
+   allow_insecure_http = true     # plain HTTP for a local pilot; otherwise set ssl_certfile / ssl_keyfile below
+   ssl_certfile = ""              # with TLS: "./config/server.crt"  (put the files in the config folder)
+   ssl_keyfile  = ""              #           "./config/server.key"
+   ```
+
+   `host` and `port` in this file are ignored inside the container: it always listens on 8080, and Docker publishes
+   that as `HOST_BIND:HOST_PORT` from `docker/docker.conf`. Paths for data, logs and `master.key` are also fixed
+   inside the container, so you don't need to change them.
+
+### 3. Build the image
 
 ```bash
-scripts/docker-build.sh                 # builds sqlassist:<stamp> + :latest for linux/amd64, saves docker/images/sqlassist-<stamp>-linux-amd64.tar.gz
-scripts/docker-build.sh --rebuild-web   # run `vp build` first (otherwise the UI already in server/app/static is used)
-scripts/docker-start.sh                 # loads a newer image file if there is one, (re)creates the container, waits until healthy
-scripts/docker-start.sh --data-dir /srv/sqlassist/data --port 8443 --bind 0.0.0.0
-scripts/docker-stop.sh                  # graceful stop (DuckDB checkpoint); --remove also deletes the container
+scripts/docker-build.sh                 # uses the web UI already in server/app/static
+scripts/docker-build.sh --rebuild-web   # runs `vp build` first, so the image has your latest web changes
 ```
 
-- **Image files and updates.** Each build saves an image file named with its build stamp (UTC). The stamp is
-  also stored in the image as a label. To update another machine, copy the new file into its `docker/images` folder
-  and run the start script. It loads the file only when the file's stamp is newer than the image Docker already has.
-  It then replaces the container, because the container was made from the older image. Data and config stay on the host.
-- **Data and config.** `DATA_DIR` (default `./data`) is mounted read-write at `/data`, so the DuckDB store, uploads,
-  exports, logs and backups are host files. `CONFIG_DIR` (default `./config`) is mounted at `/app/config` and holds
-  `sqlassist.toml`, `master.key` and TLS files. In `sqlassist.toml`, refer to cert/key files as `./config/<file>`.
-  Inside the container, the data folder, log folder, key path, host (0.0.0.0) and port (8080) are fixed by
-  environment variables. Use `HOST_BIND` / `HOST_PORT` to choose where it is published.
-- **Permissions.** Every file baked into the image is read/write for all users (`chmod -R a+rwX`), so the image runs
-  under any user ID. On Linux/macOS the start script runs the container as your own `uid:gid` (`RUN_AS=auto`). Files it
-  writes into `DATA_DIR` therefore stay owned by you and remain readable and writable from the host. Set
-  `RUN_AS=uid:gid` to use another owner. On startup the entrypoint checks that `/data` is writable and says which
-  user lacks access if it isn't.
-- **Offline extras.** The build bundles DuckDB `fts`/`vss` (when extensions.duckdb.org is reachable). They are copied
-  into `{data}/extensions` on first start. Optional drivers: `DRIVERS=oracledb mariadb`.
-- **Proxies / private mirrors.** `HTTP(S)_PROXY` from your shell are passed to the build. Use `PIP_INDEX_URL`
-  for an internal PyPI, and `BASE_IMAGE` if Docker Hub is not reachable (any Debian/Ubuntu image with Python 3.12
-  and `python3 -m venv`).
-- Don't run the Docker container and a host install (`scripts/start.sh`) on the same data folder at the same time.
-  DuckDB allows only one writer.
+The first build takes a few minutes; later builds reuse Docker's cache. When it finishes you have:
+
+- the image `sqlassist:latest` (plus `sqlassist:<stamp>`) in Docker, and
+- an image file `docker/images/sqlassist-<stamp>-linux-amd64.tar.gz` (about 280 MB) for copying to other machines.
+  The stamp is the build time in UTC, e.g. `20261028-021500`. The newest 3 files are kept (`KEEP_IMAGES`).
+
+Build options:
+
+| Option | What it does |
+|---|---|
+| `--rebuild-web` | Build the web UI with `vp` first and copy it into the server |
+| `--no-save` | Only build into Docker; don't write the image file |
+| `--no-cache` | Rebuild every layer (e.g. to pick up new OS security updates) |
+| `--drivers "oracledb mariadb"` | Database drivers to include (PostgreSQL and DuckDB are always included) |
+| `--base-image IMAGE` | Base image, e.g. one from an internal registry |
+| `--pip-index-url URL` | Internal PyPI mirror |
+| `--tag STAMP` | Use your own stamp instead of the current time |
+
+### 4. Start
+
+```bash
+scripts/docker-start.sh
+```
+
+The script:
+
+1. looks in `docker/images` for the newest image file and loads it if it's newer than the image Docker has,
+2. creates the container (or replaces it if it was made from an older image),
+3. waits until the app answers, then prints its address.
+
+```
+Image is up to date (build 20261028-021500; newest file is 20261028-021500).
+==> Creating container sqlassist
+Waiting for SQL Assistant....
+SQL Assistant is up: http://127.0.0.1:8080  (data: /Users/you/intelligent-sql/data, config: …/config)
+First start: initial admin password is in /Users/you/intelligent-sql/data/run/initial-admin-password.txt
+```
+
+Open the address in your browser. On a brand-new data folder, sign in as `admin` with the password from that file;
+you'll be asked to change it.
+
+The container restarts by itself after a reboot or a Docker restart, until you stop it with the stop script.
+
+Start options (they override `docker/docker.conf` for this run):
+
+| Option | What it does |
+|---|---|
+| `--data-dir DIR` | Use another data folder |
+| `--config-dir DIR` | Use another config folder |
+| `--port N` / `--bind ADDR` | Publish on another port / address (`0.0.0.0` = reachable from other machines; set up TLS first) |
+| `--image-file FILE` | Load this image file instead of the newest one in `docker/images` |
+| `--no-load` | Don't look for image files; use the image Docker already has |
+| `--recreate` | Re-create the container even if the image hasn't changed (e.g. after changing settings) |
+
+Exit codes: `0` started, `1` failed (the last log lines are shown), `2` already running.
+
+### 5. Stop
+
+```bash
+scripts/docker-stop.sh            # graceful: finishes running jobs and saves the database (up to 40 s)
+scripts/docker-stop.sh --remove   # also deletes the container; data and config stay on the host
+```
+
+### 6. Update, or install on another machine
+
+On the build machine, run `scripts/docker-build.sh`. Then, on the target machine (which only needs Docker and this
+project folder, or just the `scripts`, `docker` and `config` folders):
+
+1. Copy the new `docker/images/sqlassist-<stamp>-linux-amd64.tar.gz` into the target's `docker/images` folder.
+2. Run `scripts/docker-start.sh`. It sees the newer file, loads it and replaces the running container:
+
+   ```
+   ==> Loading image file sqlassist-20261029-010000-linux-amd64.tar.gz (build 20261029-010000; Docker has 20261028-021500)
+   ==> Image changed: replacing container sqlassist (data and config stay on the host)
+   ```
+
+The newest file is only loaded when it's newer than the image Docker has. To roll back on purpose, name the file:
+`scripts/docker-start.sh --image-file docker/images/<older file>`. That always loads it and switches the container to
+it. A plain start later moves forward again if a newer file is still in `docker/images`, so delete or move the newer
+file, or start with `--no-load`, to stay on the older build.
+
+<a id="docker-settings"></a>
+### Settings (`docker/docker.conf`)
+
+One `KEY=VALUE` per line, no quotes, no comments at the end of a line. An environment variable with the same name
+wins over the file, and a command-line option wins over both. Relative paths are relative to the project folder.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DATA_DIR` | `data` | Data folder (database, uploads, exports, logs, backups), mounted read-write at `/data` |
+| `CONFIG_DIR` | `config` | Folder with `sqlassist.toml`, `master.key` and TLS files, mounted at `/app/config` |
+| `HOST_BIND` | `127.0.0.1` | Address to publish on; `127.0.0.1` = this machine only, `0.0.0.0` = the network |
+| `HOST_PORT` | `8080` | Port to publish on |
+| `RUN_AS` | `auto` | `auto` = run as your own user on Linux/macOS (files in the data folder stay yours); `root`; or `uid:gid` |
+| `TZ` | `Asia/Singapore` | Time zone in the container (backup schedule, log display) |
+| `IMAGE_NAME` / `CONTAINER_NAME` | `sqlassist` | Names in Docker |
+| `IMAGE_DIR` | `docker/images` | Where image files are written and looked for |
+| `KEEP_IMAGES` | `3` | How many image files the build keeps |
+| `BASE_IMAGE` | `python:3.12-slim-bookworm` | Base image (any Debian/Ubuntu image with Python 3.12 and `venv`) |
+| `DRIVERS` | `oracledb` | Extra database drivers: `oracledb`, `mariadb` |
+| `PIP_INDEX_URL` | | Internal PyPI mirror |
+| `BUILD_NETWORK` | | `host` when your proxy runs on this machine (cntlm, px) |
+
+### Everyday commands
+
+```bash
+docker logs -f sqlassist          # follow the server output (app logs are also in data/logs/)
+docker ps --filter name=sqlassist # is it running, and is it healthy?
+scripts/docker-start.sh --recreate   # apply changed docker.conf settings
+```
+
+Backups run automatically every night into `data/backups` (`[duckdb] backup_cron` in `sqlassist.toml`). Back up
+`config/master.key` separately: without it, the saved database passwords and LLM API keys can't be decrypted.
+
+<a id="docker-troubleshooting"></a>
+### Troubleshooting
+
+| Message or symptom | What to do |
+|---|---|
+| `cannot reach the Docker daemon` | Start Docker Desktop (or `sudo systemctl start docker`) and try again. |
+| Build fails pulling `python:3.12-slim-bookworm` | Docker Hub is blocked: set `BASE_IMAGE` to the same image in your internal registry. |
+| Build fails at `pip install` | Set `PIP_INDEX_URL` to your internal PyPI. If your proxy runs on 127.0.0.1, also set `BUILD_NETWORK=host`. Your shell's `HTTP(S)_PROXY` are passed to the build automatically. |
+| `WARNING: DuckDB fts/vss extensions could not be downloaded` | Not fatal: search uses slower fallbacks. To add them later, run `python3 scripts/bundle_extensions.py --platform linux_amd64 --out data/extensions` on a machine with internet access (copy `data/extensions` across if that's another machine), then restart. |
+| `Refusing plain HTTP` in the startup log | Set `allow_insecure_http = true` in `config/sqlassist.toml`, or configure `ssl_certfile` / `ssl_keyfile`. Then start again. |
+| `the data folder mounted at /data is not writable by uid=…` | The folder belongs to another user. Fix the folder's permissions, or set `RUN_AS` to its owner (`ls -ln data` shows the uid:gid). |
+| `port is already allocated` | Something else uses the port (e.g. the non-Docker app via `scripts/start.sh`). Stop it, or set `HOST_PORT`. |
+| `Could not set lock on file …/sqlassist.duckdb` | The normal install (`scripts/start.sh`) and the container can't use the same data folder at the same time. Stop one of them. |
+| Very slow build or app on a Mac | Turn on Rosetta emulation in Docker Desktop (see step 1). |
+| The container stopped during startup | The start script prints the last log lines; `docker logs sqlassist` shows everything. |
+
+### How it works
+
+- **Data and config are host folders.** `DATA_DIR` is mounted at `/data` and `CONFIG_DIR` at `/app/config`, so the
+  container itself holds no state. Inside it, the data folder, log folder, key file, listen address (`0.0.0.0`) and
+  port (`8080`) are fixed with environment variables.
+- **Permissions.** Every file in the image is readable and writable by any user ID, so the container can run as your
+  own user. Files it creates in the data folder are owned by you, and private files (`master.key`, the admin password
+  file) stay owner-only. At startup it checks that `/data` is writable and says which user lacks access if not.
+- **Versioned image files.** Each build's stamp is in the file name and stored inside the image, which is how the start
+  script knows whether a file is newer than what Docker has, on any Docker installation.
+- **Graceful stop.** `docker stop` sends SIGTERM; the app finishes running work and checkpoints DuckDB before exiting.
+- **Offline extras.** The build includes the DuckDB `fts`/`vss` extensions when it can download them, and copies them
+  into `data/extensions` on first start.
 
 ## Where this deviates from the spec
 

@@ -12,14 +12,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/docker-common.sh"
 load_settings
 
-IMAGE_FILE=""; NO_LOAD=0; RECREATE=0
+IMAGE_FILE=""; NO_LOAD=0; RECREATE=0; EXPLICIT=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --data-dir) DATA_DIR="$2"; shift 2;;
     --config-dir) CONFIG_DIR="$2"; shift 2;;
     --port) HOST_PORT="$2"; shift 2;;
     --bind) HOST_BIND="$2"; shift 2;;
-    --image-file) IMAGE_FILE="$2"; shift 2;;
+    --image-file) IMAGE_FILE="$2"; EXPLICIT=1; shift 2;;
     --no-load) NO_LOAD=1; shift;;
     --recreate) RECREATE=1; shift;;
     -h|--help) sed -n '2,11p' "$0"; exit 0;;
@@ -36,10 +36,12 @@ if [[ $NO_LOAD -eq 0 ]]; then
   if [[ -n "$IMAGE_FILE" ]]; then
     [[ -f "$IMAGE_FILE" ]] || { echo "ERROR: image file not found: $IMAGE_FILE" >&2; exit 1; }
     FILE_STAMP="$(file_stamp "$IMAGE_FILE")"
-    if [[ -z "$CUR_STAMP" || "$FILE_STAMP" > "$CUR_STAMP" ]]; then
+    # the newest file loads only if it's newer; a file named with --image-file always loads (e.g. to roll back)
+    if [[ $EXPLICIT -eq 1 || -z "$CUR_STAMP" || "$FILE_STAMP" > "$CUR_STAMP" ]]; then
       echo "==> Loading image file $(basename "$IMAGE_FILE") (build $FILE_STAMP; Docker has ${CUR_STAMP:-none})"
       docker load -i "$IMAGE_FILE"
       # make sure :latest points at what we just loaded (files from other machines may carry only the stamp tag)
+      # point :latest at what was just loaded (an older file's :latest tag doesn't move it back by itself)
       if [[ "$(image_stamp "$IMAGE")" != "$FILE_STAMP" ]] && docker image inspect "$IMAGE_NAME:$FILE_STAMP" >/dev/null 2>&1; then
         docker tag "$IMAGE_NAME:$FILE_STAMP" "$IMAGE"
       fi

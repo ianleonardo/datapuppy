@@ -10,14 +10,14 @@ rem Settings: docker\docker.conf. Exit codes: 0 OK, 1 failed, 2 already running.
 setlocal EnableExtensions EnableDelayedExpansion
 call "%~dp0docker-settings.cmd" || goto :fail
 
-set "IMAGE_FILE=" & set "NO_LOAD=0" & set "RECREATE=0"
+set "IMAGE_FILE=" & set "NO_LOAD=0" & set "RECREATE=0" & set "EXPLICIT=0"
 :args
 if "%~1"=="" goto :argsdone
 if /i "%~1"=="--data-dir" (set "DATA_DIR=%~2" & shift & shift & goto :args)
 if /i "%~1"=="--config-dir" (set "CONFIG_DIR=%~2" & shift & shift & goto :args)
 if /i "%~1"=="--port" (set "HOST_PORT=%~2" & shift & shift & goto :args)
 if /i "%~1"=="--bind" (set "HOST_BIND=%~2" & shift & shift & goto :args)
-if /i "%~1"=="--image-file" (set "IMAGE_FILE=%~f2" & shift & shift & goto :args)
+if /i "%~1"=="--image-file" (set "IMAGE_FILE=%~f2" & set "EXPLICIT=1" & shift & shift & goto :args)
 if /i "%~1"=="--no-load" (set "NO_LOAD=1" & shift & goto :args)
 if /i "%~1"=="--recreate" (set "RECREATE=1" & shift & goto :args)
 echo Unknown option: %~1 1>&2
@@ -42,6 +42,7 @@ if "%NO_LOAD%"=="0" (
     set "FILE_STAMP=!FILE_STAMP:-linux-amd64.tar=!"
     set "DOLOAD=0"
     if not defined CUR_STAMP set "DOLOAD=1"
+    if "%EXPLICIT%"=="1" set "DOLOAD=1"
     if defined CUR_STAMP if "!FILE_STAMP!" GTR "!CUR_STAMP!" set "DOLOAD=1"
     if "!DOLOAD!"=="1" (
       if defined CUR_STAMP (set "HAVE=!CUR_STAMP!") else (set "HAVE=none")
