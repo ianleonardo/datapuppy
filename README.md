@@ -262,7 +262,7 @@ wins over the file, and a command-line option wins over both. Relative paths are
 |---|---|---|
 | `DATA_DIR` | `data` | Data folder (database, uploads, exports, logs, backups), mounted read-write at `/data` |
 | `CONFIG_DIR` | `config` | Folder with `sqlassist.toml`, `master.key` and TLS files, mounted at `/app/config` |
-| `HOST_BIND` | `127.0.0.1` | Address to publish on; `127.0.0.1` = this machine only, `0.0.0.0` = the network |
+| `HOST_BIND` | `127.0.0.1` | IP address to publish on (not a host name); `127.0.0.1` = this machine only, `0.0.0.0` = all interfaces, so other computers can connect |
 | `HOST_PORT` | `8080` | Port to publish on |
 | `RUN_AS` | `auto` | `auto` = run as your own user on Linux/macOS (files in the data folder stay yours); `root`; or `uid:gid` |
 | `TZ` | `Asia/Singapore` | Time zone in the container (backup schedule, log display) |
@@ -297,6 +297,7 @@ Backups run automatically every night into `data/backups` (`[duckdb] backup_cron
 | `docker load` fails with `lsetxattr com.apple.provenance … operation not supported` | The image file was built from macOS files that carry Apple extended attributes. Rebuild with the current `docker-build.sh` (it clears them and copies files without them), then use the new image file. Delete the old `docker/images/*.tar.gz` that failed. |
 | `Refusing plain HTTP` in the startup log | Set `allow_insecure_http = true` in `config/sqlassist.toml`, or configure `ssl_certfile` / `ssl_keyfile`. Then start again. |
 | `the data folder mounted at /data is not writable by uid=…` | The folder belongs to another user. Fix the folder's permissions, or set `RUN_AS` to its owner (`ls -ln data` shows the uid:gid). |
+| Cannot connect from another computer (telnet fails) | Set `HOST_BIND=0.0.0.0` (or the server's IP from `hostname -I`), not a host name or `127.0.0.1`; run `docker ps` and check `PORTS` shows `0.0.0.0:<port>->8080`; open the port in the server firewall (`sudo firewall-cmd --add-port=<port>/tcp --permanent && sudo firewall-cmd --reload`, or `ufw allow <port>/tcp`). |
 | `port is already allocated` | Something else uses the port (e.g. the non-Docker app via `scripts/start.sh`). Stop it, or set `HOST_PORT`. |
 | `Could not set lock on file …/sqlassist.duckdb` | The normal install (`scripts/start.sh`) and the container can't use the same data folder at the same time. Stop one of them. |
 | Very slow build or app on a Mac | Turn on Rosetta emulation in Docker Desktop (see step 1). |

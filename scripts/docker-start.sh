@@ -27,6 +27,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 need_docker
+# HOST_BIND must be an IP address. A host name is resolved here; names that map to the loopback address (common
+# for a server's own name in /etc/hosts, e.g. 127.0.1.1) would make the port reachable from this machine only.
+if [[ ! "$HOST_BIND" =~ ^[0-9.]+$ && ! "$HOST_BIND" =~ : ]]; then
+  RESOLVED="$(getent ahostsv4 "$HOST_BIND" 2>/dev/null | awk 'NR==1{print $1}')"
+  if [[ -z "$RESOLVED" ]]; then
+    echo "ERROR: HOST_BIND='$HOST_BIND' is not an IP address and cannot be resolved. Use 0.0.0.0 (all interfaces) or the server's IP." >&2; exit 1
+  fi
+  if [[ "$RESOLVED" == 127.* ]]; then
+    echo "ERROR: HOST_BIND='$HOST_BIND' resolves to $RESOLVED (this machine only), so other computers could not connect." >&2
+    echo "       Set HOST_BIND=0.0.0.0 in docker/docker.conf (or use the server's real IP, see: hostname -I)." >&2; exit 1
+  fi
+  echo "NOTE: HOST_BIND '$HOST_BIND' resolved to $RESOLVED"; HOST_BIND="$RESOLVED"
+fi
 IMAGE="$IMAGE_NAME:latest"
 
 # ---- 1) newer image file? ------------------------------------------------------------------------------------------
