@@ -303,6 +303,30 @@ def render_card(t: dict, cols: list[dict], rels: list[dict]) -> str:
     return "\n".join(lines)
 
 
+async def embed_cards(embedder, texts: list[str]) -> list[list[float] | None]:
+    """Embed schema cards without letting one bad card lose them all.
+
+    Very wide tables make very long cards; embedding models cap the input (bge-m3: 8192 tokens), so the text sent for
+    embedding is cut to schema.embed_card_max_chars (the stored card is not). A failing batch is retried one card at a
+    time; cards that still fail get no vector and stay searchable by keyword."""
+    cap = int(settings.get("schema.embed_card_max_chars", 6000))
+    batch = max(1, int(getattr(embedder, "params", {}).get("embed_batch", 16)))
+    out: list[list[float] | None] = [None] * len(texts)
+    cut = [t[:cap] for t in texts]
+    for i in range(0, len(cut), batch):
+        try:
+            out[i:i + batch] = await embedder.embed(cut[i:i + batch])
+            continue
+        except Exception as e:  # noqa: BLE001
+            log.warning("schema card embedding batch %d-%d failed (%s); retrying one by one", i, i + batch, e)
+        for j in range(i, min(i + batch, len(cut))):
+            try:
+                out[j] = (await embedder.embed([cut[j]]))[0]
+            except Exception as e:  # noqa: BLE001
+                log.warning("schema card %d could not be embedded: %s", j, e)
+    return out
+
+
 async def lock_snapshot(store: AppStore, snap_id: str, user_ref: str, embedder) -> dict[str, Any]:
     snap = await store.fetchone("SELECT * FROM schema_snapshots WHERE id = ?", [snap_id])
     if not snap:
@@ -322,15 +346,13 @@ async def lock_snapshot(store: AppStore, snap_id: str, user_ref: str, embedder) 
     embedded = False
     dim = None
     if embedder is not None and cards:
-        try:
-            vectors = []
-            for i in range(0, len(cards), 32):
-                vectors += await embedder.embed([c for _, c in cards[i:i + 32]])
-            embedded = True
-            dim = len(vectors[0]) if vectors else None
-        except Exception as e:  # noqa: BLE001 — degrade: keyword retrieval over cards
-            log.warning("schema card embedding failed; locking without vectors (keyword search still works; check the primary embedding provider in Admin → LLM providers, then re-index): %s", e)
-            vectors = [None] * len(cards)
+        vectors = await embed_cards(embedder, [c for _, c in cards])
+        embedded = any(v is not None for v in vectors)
+        dim = next((len(v) for v in vectors if v is not None), None)
+        failed = sum(v is None for v in vectors)
+        if failed:
+            log.warning("schema card embedding: %d of %d cards have no vector (keyword search still works for them; "
+                        "check the primary embedding provider in Admin → LLM providers, then re-index)", failed, len(cards))
     conn_id = str(snap["connection_id"])
     store_dim = _embed_dim(store)
     if embedded and dim != store_dim:

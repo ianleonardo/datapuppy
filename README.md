@@ -298,10 +298,30 @@ Backups run automatically every night into `data/backups` (`[duckdb] backup_cron
 | `Refusing plain HTTP` in the startup log | Set `allow_insecure_http = true` in `config/sqlassist.toml`, or configure `ssl_certfile` / `ssl_keyfile`. Then start again. |
 | `the data folder mounted at /data is not writable by uid=…` | The folder belongs to another user. Fix the folder's permissions, or set `RUN_AS` to its owner (`ls -ln data` shows the uid:gid). |
 | Cannot connect from another computer (telnet fails) | Set `HOST_BIND=0.0.0.0` (or the server's IP from `hostname -I`), not a host name or `127.0.0.1`; run `docker ps` and check `PORTS` shows `0.0.0.0:<port>->8080`; open the port in the server firewall (`sudo firewall-cmd --add-port=<port>/tcp --permanent && sudo firewall-cmd --reload`, or `ufw allow <port>/tcp`). |
+| `DPY-3001 … only supported in python-oracledb thick mode` | See [Oracle Native Network Encryption](#oracle-native-network-encryption-dpy-3001): rebuild the image so Instant Client is included, then test the connection again. |
 | `port is already allocated` | Something else uses the port (e.g. the non-Docker app via `scripts/start.sh`). Stop it, or set `HOST_PORT`. |
 | `Could not set lock on file …/sqlassist.duckdb` | The normal install (`scripts/start.sh`) and the container can't use the same data folder at the same time. Stop one of them. |
 | Very slow build or app on a Mac | Turn on Rosetta emulation in Docker Desktop (see step 1). |
 | The container stopped during startup | The start script prints the last log lines; `docker logs sqlassist` shows everything. |
+
+### Oracle Native Network Encryption (`DPY-3001`)
+
+If a connection test fails with `DPY-3001: Native Network Encryption and Data Integrity is only supported in
+python-oracledb thick mode`, the database enforces encryption that the driver's default (thin) mode cannot do. It
+needs Oracle Instant Client ("thick mode").
+
+- **Docker:** the image includes Oracle Instant Client (Basic Light) when `DRIVERS` contains `oracledb`, and the app
+  switches to thick mode by itself. The build downloads it from oracle.com. If the build machine cannot reach
+  oracle.com, download `instantclient-basiclite-linux.x64-*.zip` from Oracle
+  (<https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html>), put the zip in
+  `docker/oracle-client/` and build again; or set `ORACLE_CLIENT_URL` in `docker/docker.conf` to an internal mirror.
+  The build prints `WARNING: Oracle Instant Client could not be installed` when it did not work. Check the image with:
+  `docker run --rm --entrypoint ls sqlassist /opt/oracle/instantclient`.
+- **Without Docker:** install Instant Client on the server, set `SQLASSIST_ORACLE_CLIENT_DIR` to its folder (or fill in
+  "Instant Client folder" on the connection) and restart. Tick **Oracle Client (thick mode)** on the connection
+  (Admin → Connections → Edit) to force it.
+- Thick mode is switched on once per server process, so restart after changing it. It applies to all Oracle
+  connections of that process. To keep one connection on thin mode, set `thick` to false in its params.
 
 ### How it works
 

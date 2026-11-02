@@ -48,6 +48,7 @@ ARGS=(--platform linux/amd64 -f "$ROOT/docker/Dockerfile"
       --build-arg "BUILD_STAMP=$STAMP" --build-arg "BASE_IMAGE=$BASE_IMAGE" --build-arg "DRIVERS=$DRIVERS")
 if [[ -n "$BUILD_NETWORK" ]]; then ARGS+=(--network "$BUILD_NETWORK"); fi
 if [[ -n "$PIP_INDEX_URL" ]]; then ARGS+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL"); fi
+if [[ -n "$ORACLE_CLIENT_URL" ]]; then ARGS+=(--build-arg "ORACLE_CLIENT_URL=$ORACLE_CLIENT_URL"); fi
 for v in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
   if [[ -n "${!v:-}" ]]; then ARGS+=(--build-arg "$v=${!v}"); fi
 done

@@ -71,6 +71,7 @@ RUNTIME_DEFAULTS: dict[str, Any] = {
     "rag.schema_max_tables": 20,
     "rag.hnsw_threshold": 200000,
     "schema.max_tables": 5000,
+    "schema.embed_card_max_chars": 6000,
     "theme.windows": {"morning": [5, 12], "afternoon": [12, 18], "night": [18, 5]},
     "ui.mascot_enabled": True,
     "ratelimit.chat_per_min": 30,

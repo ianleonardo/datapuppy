@@ -538,6 +538,20 @@ class MariaDBAdapter(BaseAdapter):
 
 
 # ----------------------------------------------------------------------------- Oracle
+def _has_oracle_client(lib_dir: str) -> bool:
+    d = Path(lib_dir)
+    if not d.is_dir():
+        return False
+    return any(d.glob("libclntsh.so*")) or any(d.glob("libclntsh.dylib*")) or (d / "oci.dll").exists()
+
+
+def oracledb_is_thick(oracledb) -> bool:
+    try:
+        return not oracledb.is_thin_mode()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class OracleAdapter(BaseAdapter):
     engine, sqlglot_dialect = "ORACLE", "oracle"
     ping_sql = "SELECT 1 FROM DUAL"
@@ -547,9 +561,7 @@ class OracleAdapter(BaseAdapter):
         import oracledb
 
         p = self.params
-        if p.get("thick") and not OracleAdapter._thick_init:
-            oracledb.init_oracle_client(lib_dir=p.get("instant_client_dir") or None)
-            OracleAdapter._thick_init = True
+        self._ensure_thick(oracledb, p)
         kw: dict[str, Any] = dict(user=self.secret.get("username"), password=self.secret.get("password"))
         mode = p.get("mode", "easy")
         try:
@@ -568,8 +580,32 @@ class OracleAdapter(BaseAdapter):
             msg = _clean(e)
             if "TNS" in msg or "DPY-4" in msg:
                 raise ApiError("E-CON-002") from e
+            if "DPY-3001" in msg and not oracledb_is_thick(oracledb):
+                msg += (" — this database requires Oracle Client (thick mode): tick 'Oracle Client (thick mode)' on the"
+                        " connection and make sure Oracle Instant Client is installed on the server (the Docker image"
+                        " includes it; see the README, 'Oracle Native Network Encryption').")
             raise ApiError("E-CON-001", detail=msg) from e
         return con
+
+    @staticmethod
+    def _ensure_thick(oracledb, p: dict) -> None:
+        """Thick mode (needed for Native Network Encryption) is switched on per process, before the first connection:
+        when the connection asks for it, or when an Instant Client is installed (SQLASSIST_ORACLE_CLIENT_DIR, set in
+        the Docker image) and the connection does not opt out (thick = false)."""
+        if OracleAdapter._thick_init:
+            return
+        lib_dir = (p.get("instant_client_dir") or os.environ.get("SQLASSIST_ORACLE_CLIENT_DIR") or "").strip() or None
+        wanted = p.get("thick")
+        if wanted is None or wanted == "":
+            wanted = bool(lib_dir and _has_oracle_client(lib_dir))
+        if not wanted:
+            return
+        try:
+            oracledb.init_oracle_client(lib_dir=lib_dir)
+        except Exception as e:  # noqa: BLE001
+            if "DPY-2017" not in str(e):  # already initialised
+                raise ApiError("E-CON-001", detail=f"Oracle Client (thick mode) could not be loaded: {_clean(e)}") from e
+        OracleAdapter._thick_init = True
 
     def _wallet_dir(self) -> str:
         """Wallet zip stored encrypted in data_dir/wallets; decrypted to a per-process owner-only temp dir."""

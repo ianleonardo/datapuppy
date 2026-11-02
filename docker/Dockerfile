@@ -19,6 +19,7 @@ FROM scratch AS src
 COPY server/ /server/
 COPY config/sqlassist.example.toml /config/sqlassist.example.toml
 COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/oracle-client/ /oracle-client/
 
 FROM --platform=linux/amd64 ${BASE_IMAGE}
 
@@ -27,6 +28,9 @@ ARG DRIVERS="oracledb"
 ARG PIP_INDEX_URL=""
 ARG PIP_TRUSTED_HOST=""
 ARG BUILD_STAMP=dev
+# Oracle Instant Client (thick mode, needed for Native Network Encryption). Used when DRIVERS includes oracledb:
+# a zip placed in docker/oracle-client/ wins; otherwise it is downloaded from this URL. Best effort.
+ARG ORACLE_CLIENT_URL="https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip"
 
 LABEL org.opencontainers.image.title="AI SQL Assistant" \
       org.opencontainers.image.authors="Ian Leonardo" \
@@ -45,7 +49,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SQLASSIST_SECURITY__MASTER_KEY_FILE=/app/config/master.key \
     SQLASSIST_SERVER__HOST=0.0.0.0 \
     SQLASSIST_SERVER__PORT=8080 \
-    SQLASSIST_EXTENSIONS_SEED=/opt/sqlassist/duckdb-extensions
+    SQLASSIST_EXTENSIONS_SEED=/opt/sqlassist/duckdb-extensions \
+    SQLASSIST_ORACLE_CLIENT_DIR=/opt/oracle/instantclient
 
 # OS libraries: libpq for psycopg, tzdata for TZ=…, MariaDB Connector/C only when that driver is requested.
 RUN set -eux; \
@@ -71,6 +76,17 @@ RUN --mount=type=bind,from=src,source=/server/requirements.lock,target=/src/requ
     if [ -n "$extra" ]; then pip install $extra; fi; \
     case " $DRIVERS " in *" mariadb "*) apt-get purge -y --auto-remove gcc libmariadb-dev || true;; esac; \
     true
+
+# Oracle Instant Client (Basic Light) for thick mode: lets python-oracledb talk to databases that require Native
+# Network Encryption / Data Integrity (DPY-3001). Best effort: without it the app still runs in thin mode.
+RUN --mount=type=bind,from=src,source=/oracle-client,target=/src/oracle-client \
+    set -eu; \
+    case " $DRIVERS " in *" oracledb "*) ;; *) exit 0;; esac; \
+    if ORACLE_CLIENT_URL="$ORACLE_CLIENT_URL" sh /src/oracle-client/install.sh; then :; else \
+      rm -rf /opt/oracle/instantclient; \
+      echo "WARNING: Oracle Instant Client could not be installed; Oracle databases that require Native Network Encryption will not work."; \
+    fi; \
+    rm -rf /tmp/oc /tmp/ic.zip /var/lib/apt/lists/*
 
 # DuckDB fts / vss extensions for offline use (DD-14). Seeded into /data/extensions on first start.
 # Best effort: without network access to extensions.duckdb.org the app still runs (keyword/vector fallbacks).

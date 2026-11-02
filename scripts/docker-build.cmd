@@ -48,6 +48,7 @@ echo ==^> Building image %IMAGE_NAME%:%STAMP% for linux/amd64
 set "BARGS=--platform linux/amd64 -f "%SQA_ROOT%\docker\Dockerfile" -t %IMAGE_NAME%:%STAMP% -t %IMAGE_NAME%:latest --build-arg BUILD_STAMP=%STAMP% --build-arg BASE_IMAGE=%BASE_IMAGE% --build-arg "DRIVERS=%DRIVERS%""
 if defined BUILD_NETWORK set "BARGS=%BARGS% --network %BUILD_NETWORK%"
 if defined PIP_INDEX_URL set "BARGS=%BARGS% --build-arg PIP_INDEX_URL=%PIP_INDEX_URL%"
+if defined ORACLE_CLIENT_URL set "BARGS=%BARGS% --build-arg ORACLE_CLIENT_URL=%ORACLE_CLIENT_URL%"
 if defined HTTP_PROXY set "BARGS=%BARGS% --build-arg HTTP_PROXY=%HTTP_PROXY%"
 if defined HTTPS_PROXY set "BARGS=%BARGS% --build-arg HTTPS_PROXY=%HTTPS_PROXY%"
 if defined NO_PROXY set "BARGS=%BARGS% --build-arg NO_PROXY=%NO_PROXY%"

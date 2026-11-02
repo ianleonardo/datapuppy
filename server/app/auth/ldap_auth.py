@@ -136,6 +136,15 @@ def map_role(cfg: dict[str, Any], groups: list[str]) -> tuple[str | None, bool, 
 def test_connection(cfg: dict[str, Any], bind_password: str | None, test_user: str | None) -> dict[str, Any]:
     from ldap3 import SUBTREE
 
+    if cfg.get("bind_mode", "search_then_bind") == "direct_bind":
+        # Direct bind needs the person's own password, so only reachability (and TLS) can be checked here.
+        conn = _connection(cfg, None, None)
+        conn.unbind()
+        tmpl = cfg.get("user_dn_template") or ""
+        hint = " — the user DN template still has a placeholder (<domain>/<tld>); replace it" if "<" in tmpl else ""
+        return {"ok": True, "detail": "Directory reachable. Direct bind is verified when someone signs in" + hint}
+    if not cfg.get("bind_dn"):
+        return {"ok": False, "detail": "Service account DN is empty. Fill it in, or switch Bind mode to 'Direct bind'"}
     svc = _connection(cfg, cfg.get("bind_dn") or None, bind_password)
     if not svc.bind():
         return {"ok": False, "detail": "service bind failed"}

@@ -505,9 +505,33 @@ def probe_sql(v: Validated) -> str:
 
 def page_sql(v: Validated, sort: list[tuple[str, str]], limit: int, offset: int, tiebreak: list[str]) -> str:
     q = exp.select("*").from_(exp.Subquery(this=v.ast.copy(), alias=exp.TableAlias(this=exp.to_identifier("q"))))
-    order = [exp.Ordered(this=exp.column(c, table="q", quoted=True), desc=(d == "desc")) for c, d in sort]
+    def col(c: str) -> exp.Column:
+        # Quote the column name (exact result-set spelling) but NOT the alias: the alias q is unquoted above, and
+        # Oracle folds it to Q, so a quoted "q" would be a different, unknown name (ORA-00904).
+        return exp.Column(this=exp.to_identifier(c, quoted=True), table=exp.to_identifier("q"))
+
+    order = [exp.Ordered(this=col(c), desc=(d == "desc")) for c, d in sort]
     used = {c for c, _ in sort}
-    order += [exp.Ordered(this=exp.column(c, table="q", quoted=True)) for c in tiebreak if c not in used]
+    inner_order = v.ast.args.get("order") if isinstance(v.ast, exp.Select) else None
+    if not sort and inner_order is not None:
+        # The query has its own ORDER BY and the user has not picked a grid sort: keep the query's order (repeat it
+        # on the outer select when its keys are plain result columns, else rely on the inner order) instead of
+        # re-sorting by the first columns, which would turn "top 10 by count" into "sorted by name".
+        by_name = {t.upper(): t for t in tiebreak}
+        keys = []
+        for o in inner_order.expressions:
+            e = o.this
+            name = by_name.get(e.name.upper()) if isinstance(e, exp.Column) else None
+            if name is None:
+                keys = None
+                break
+            keys.append(exp.Ordered(this=col(name), desc=bool(o.args.get("desc")), nulls_first=o.args.get("nulls_first")))
+        order = keys or []
+        used = {k.this.name for k in order}
+        if keys:
+            order += [exp.Ordered(this=col(c)) for c in tiebreak if c not in used]
+    else:
+        order += [exp.Ordered(this=col(c)) for c in tiebreak if c not in used]
     if order:
         q = q.order_by(*order)
     q = q.limit(int(limit)).offset(int(offset))

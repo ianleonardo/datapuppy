@@ -172,9 +172,9 @@ async def reindex(store: AppStore, payload: dict, progress) -> dict:
     for i in range(0, len(chunks), batch):
         cvec += await emb.embed([c["content"] for c in chunks[i:i + batch]])
         progress({"phase": "chunks", "done": min(i + batch, len(chunks)), "total": len(chunks)})
-    svec: list = []
-    for i in range(0, len(cards), batch):
-        svec += await emb.embed([c["card_text"] for c in cards[i:i + batch]])
+    from ..services.schema import embed_cards
+
+    svec = await embed_cards(emb, [c["card_text"] for c in cards])
 
     def unit(c):
         c.execute("CREATE TABLE doc_chunks_new (id BIGINT PRIMARY KEY DEFAULT nextval('doc_chunk_seq'), document_id UUID NOT NULL, "

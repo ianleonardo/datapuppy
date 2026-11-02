@@ -123,6 +123,17 @@ const ENGINE_FIELDS: Record<string, { k: string; label: string; hint?: string; t
       { k: 'service_name', label: 'Service name (easy)' },
       { k: 'tns_alias', label: 'TNS alias (tns / wallet)' },
       { k: 'tns_admin', label: 'tnsnames.ora folder (tns)' },
+      {
+        k: 'thick',
+        label: 'Oracle Client (thick mode)',
+        type: 'bool',
+        hint: 'Needed when the database requires Native Network Encryption (DPY-3001). The Docker image already includes Oracle Instant Client and uses it automatically.',
+      },
+      {
+        k: 'instant_client_dir',
+        label: 'Instant Client folder',
+        hint: 'Optional. Leave blank to use the server default.',
+      },
     ],
   };
 const ENGINE_DEFAULTS: Record<string, Record<string, any>> = {
@@ -320,21 +331,34 @@ export function ConnectionsSection() {
               </Select>
             </Field>
             {ENGINE_FIELDS[edit.engine].map((f) => (
-              <Field key={f.k} label={f.label} hint={f.hint} wide={f.k === 'path'}>
-                <input
-                  className="input"
-                  type={f.type || 'text'}
-                  value={edit.params[f.k] ?? ''}
-                  onChange={(e) =>
-                    setEdit({
-                      ...edit,
-                      params: {
-                        ...edit.params,
-                        [f.k]: f.type === 'number' ? Number(e.target.value) : e.target.value,
-                      },
-                    })
-                  }
-                />
+              <Field key={f.k} label={f.label} hint={f.hint} wide={f.k === 'path' || f.type === 'bool'}>
+                {f.type === 'bool' ? (
+                  <label className="sqh-check">
+                    <input
+                      type="checkbox"
+                      checked={!!edit.params[f.k]}
+                      onChange={(e) =>
+                        setEdit({ ...edit, params: { ...edit.params, [f.k]: e.target.checked } })
+                      }
+                    />
+                    Use thick mode
+                  </label>
+                ) : (
+                  <input
+                    className="input"
+                    type={f.type || 'text'}
+                    value={edit.params[f.k] ?? ''}
+                    onChange={(e) =>
+                      setEdit({
+                        ...edit,
+                        params: {
+                          ...edit.params,
+                          [f.k]: f.type === 'number' ? Number(e.target.value) : e.target.value,
+                        },
+                      })
+                    }
+                  />
+                )}
               </Field>
             ))}
             {edit.engine !== 'DUCKDB' && (

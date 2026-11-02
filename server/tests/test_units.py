@@ -269,3 +269,74 @@ def test_keyword_typos_are_proposed():
     codes = {i["code"]: i["col"] for i in r["issues"]}
     assert codes["KEYWORD_TYPO"] == 25 and codes["UNKNOWN_TABLE"] == 17 and codes["UNKNOWN_COLUMN"] == 8
     assert r["corrected_sql"] == "select name from projects where id = 1"
+
+
+def test_oracle_thick_mode_selection(tmp_path, monkeypatch):
+    from app.services import connectors as c
+
+    class FakeOra:
+        calls: list = []
+
+        @staticmethod
+        def init_oracle_client(lib_dir=None):
+            FakeOra.calls.append(lib_dir)
+
+    (tmp_path / "libclntsh.so.23.1").write_text("x")
+    monkeypatch.setattr(c.OracleAdapter, "_thick_init", False)
+    monkeypatch.delenv("SQLASSIST_ORACLE_CLIENT_DIR", raising=False)
+    c.OracleAdapter._ensure_thick(FakeOra, {})                       # nothing installed, not requested -> thin
+    assert FakeOra.calls == []
+    monkeypatch.setenv("SQLASSIST_ORACLE_CLIENT_DIR", str(tmp_path))
+    c.OracleAdapter._ensure_thick(FakeOra, {"thick": False})         # explicit opt-out wins
+    assert FakeOra.calls == []
+    c.OracleAdapter._ensure_thick(FakeOra, {})                       # client installed -> thick automatically
+    assert FakeOra.calls == [str(tmp_path)]
+    c.OracleAdapter._ensure_thick(FakeOra, {"thick": True})          # only initialised once per process
+    assert len(FakeOra.calls) == 1
+
+
+def test_page_sql_alias_is_not_quoted_for_oracle():
+    from app.services import safeguards as sg
+
+    sql = "SELECT CREATEDBY, COUNT(*) AS SMS_COUNT FROM SMS.TPIB_SMS_ALERT GROUP BY CREATEDBY"
+    for engine, qc in (("ORACLE", '"'), ("POSTGRES", '"'), ("DUCKDB", '"'), ("MARIADB", "`")):
+        v = sg.validate(sql, engine)
+        out = sg.page_sql(v, [("SMS_COUNT", "desc")], 50, 0, ["CREATEDBY"])
+        assert f"{qc}q{qc}" not in out, out                      # alias must stay unquoted (Oracle folds q to Q)
+        assert f"q.{qc}SMS_COUNT{qc} DESC" in out, out
+        assert f"q.{qc}CREATEDBY{qc}" in out, out
+
+
+def test_page_sql_keeps_query_order_by():
+    from app.services import safeguards as sg
+
+    sql = ("SELECT q.CREATEDBY, q.SMS_COUNT FROM (SELECT CREATEDBY, COUNT(*) AS SMS_COUNT FROM T GROUP BY CREATEDBY) q "
+           "ORDER BY q.SMS_COUNT DESC FETCH FIRST 10 ROWS ONLY")
+    v = sg.validate(sql, "ORACLE")
+    out = sg.page_sql(v, [], 50, 0, ["CREATEDBY", "SMS_COUNT"])
+    assert out.index('q."SMS_COUNT" DESC') < out.index('q."CREATEDBY"'), out          # the query's order comes first
+    assert 'ORDER BY q."SMS_COUNT" DESC' in out.split(") q ORDER BY")[-1] or ') q ORDER BY q."SMS_COUNT" DESC' in out
+    v2 = sg.validate("SELECT a, b FROM t ORDER BY a + b", "ORACLE")                    # expression: rely on inner order
+    assert ") q OFFSET" in sg.page_sql(v2, [], 50, 0, ["A", "B"]) or "ORDER BY q" not in sg.page_sql(v2, [], 50, 0, ["A", "B"]).split(") q")[-1]
+    out3 = sg.page_sql(v, [("CREATEDBY", "asc")], 50, 0, ["CREATEDBY", "SMS_COUNT"])   # user grid sort wins
+    assert out3.split(") q ORDER BY")[-1].lstrip().startswith('q."CREATEDBY"'), out3
+
+
+def test_embed_cards_survives_a_failing_card():
+    import asyncio
+
+    from app.services.schema import embed_cards
+
+    class Emb:
+        params = {"embed_batch": 3}
+        calls = 0
+
+        async def embed(self, texts):
+            Emb.calls += 1
+            if any("BAD" in t for t in texts):
+                raise RuntimeError("input too long")
+            return [[float(len(t))] for t in texts]
+
+    out = asyncio.run(embed_cards(Emb(), ["a", "BAD", "ccc", "d" * 20000]))
+    assert out[0] == [1.0] and out[1] is None and out[2] == [3.0]
+    assert out[3] == [6000.0]                      # long card cut for embedding only

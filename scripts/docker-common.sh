@@ -20,7 +20,7 @@ load_settings() {
   fi
   : "${IMAGE_NAME:=sqlassist}" "${CONTAINER_NAME:=sqlassist}" "${IMAGE_DIR:=docker/images}" "${KEEP_IMAGES:=3}"
   : "${DATA_DIR:=data}" "${CONFIG_DIR:=config}" "${HOST_BIND:=127.0.0.1}" "${HOST_PORT:=8080}" "${RUN_AS:=auto}"
-  : "${TZ:=}" "${BASE_IMAGE:=python:3.12-slim-bookworm}" "${DRIVERS:=oracledb}" "${PIP_INDEX_URL:=}" "${BUILD_NETWORK:=}"
+  : "${TZ:=}" "${BASE_IMAGE:=python:3.12-slim-bookworm}" "${DRIVERS:=oracledb}" "${PIP_INDEX_URL:=}" "${BUILD_NETWORK:=}" "${ORACLE_CLIENT_URL:=}"
 }
 
 abspath() {  # absolute path; relative paths are taken from the project folder
