@@ -300,15 +300,25 @@ export function AuthSection() {
   const s = useLoad<any>('/admin/auth/settings');
   const [bindPw, setBindPw] = useState('');
   const [testUser, setTestUser] = useState('');
+  const [testPw, setTestPw] = useState('');
   const [test, setTest] = useState<any>(null);
   if (!s.data) return <Section title="Authentication">{s.error || 'Loading…'}</Section>;
   const v = s.data.values;
   const ldap = v.ldap || {};
   const setV = (k: string, val: any) => s.setData({ ...s.data, values: { ...v, [k]: val } });
   const setL = (k: string, val: any) => setV('ldap', { ...ldap, [k]: val });
+  const cleaned = () => ({
+    ...v,
+    ldap: Object.fromEntries(
+      Object.entries(ldap).map(([k, x]) => [
+        k,
+        Array.isArray(x) ? x.map((y: string) => y.trim()).filter(Boolean) : x,
+      ]),
+    ),
+  });
   const save = () =>
     act(
-      () => put('/admin/auth/settings', { values: v, ldap_bind_password: bindPw || null }),
+      () => put('/admin/auth/settings', { values: cleaned(), ldap_bind_password: bindPw || null }),
       () => {
         toast('Authentication settings saved');
         setBindPw('');
@@ -325,25 +335,28 @@ export function AuthSection() {
       />
     </Field>
   );
-  const lt = (k: string, label: string, hint?: string) => (
-    <Field label={label} hint={hint} wide>
-      <input
-        className="input"
-        value={Array.isArray(ldap[k]) ? ldap[k].join(', ') : (ldap[k] ?? '')}
-        onChange={(e) =>
-          setL(
-            k,
-            Array.isArray(ldap[k])
-              ? e.target.value
-                  .split(',')
-                  .map((x) => x.trim())
-                  .filter(Boolean)
-              : e.target.value,
-          )
-        }
-      />
-    </Field>
-  );
+  // Text field for one LDAP setting; list settings (servers, group DNs) are one entry per line because DNs contain commas.
+  const lt = (k: string, label: string, hint?: string) => {
+    const isList = Array.isArray(ldap[k]);
+    return (
+      <Field label={label} hint={isList ? `${hint ? hint + '. ' : ''}One per line` : hint} wide>
+        {isList ? (
+          <textarea
+            className="input"
+            rows={Math.max(2, ldap[k].length + 1)}
+            value={ldap[k].join('\n')}
+            onChange={(e) => setL(k, e.target.value.split('\n'))}
+          />
+        ) : (
+          <input
+            className="input"
+            value={ldap[k] ?? ''}
+            onChange={(e) => setL(k, e.target.value)}
+          />
+        )}
+      </Field>
+    );
+  };
   return (
     <Section
       title="Authentication"
@@ -386,26 +399,31 @@ export function AuthSection() {
       <Card>
         <h4>LDAP directory</h4>
         <div className="adm-form">
-          {lt(
-            'server_urls',
-            'Server URLs',
-            'Comma-separated; tried in order for failover, e.g. ldaps://dc1.corp:636',
-          )}
+          {lt('domain', 'NetBIOS domain', 'Users sign in as DOMAIN\\login ID, e.g. NTSGPDOM')}
+          {lt('server_urls', 'Server URLs', 'Tried in order, e.g. ldaps://sg.uobnet.com:636')}
           <Field label="Bind mode">
             <Select
               className="select"
-              value={ldap.bind_mode}
+              value={ldap.bind_mode === 'search_then_bind' ? 'search_then_bind' : 'domain'}
               onChange={(e) => setL('bind_mode', e.target.value)}
             >
-              <option value="search_then_bind">Search, then bind as user</option>
-              <option value="direct_bind">Direct bind</option>
+              <option value="domain">DOMAIN\login_id (AD)</option>
+              <option value="search_then_bind">Service account search</option>
             </Select>
           </Field>
-          <Toggle
-            checked={!!ldap.use_starttls}
-            onChange={(x) => setL('use_starttls', x)}
-            label="Use StartTLS (ldap:// on 389)"
-          />
+          {lt('base_dn', 'User base DN', 'e.g. DC=SG,DC=UOBNET,DC=COM')}
+          {lt('user_filter', 'User filter', '{username} is replaced (and escaped) at sign-in')}
+          {lt(
+            'admin_groups',
+            'Admin group DN (optional)',
+            'Members get the admin role automatically',
+          )}
+          {lt(
+            'analyst_groups',
+            'Allowed group DN (optional)',
+            'Only members may sign in; empty lets any directory user in',
+          )}
+          {lt('ca_cert_path', 'CA bundle path (optional)')}
           <Toggle
             checked={ldap.verify_ssl !== false}
             onChange={(x) => setL('verify_ssl', x)}
@@ -416,66 +434,103 @@ export function AuthSection() {
               TLS verification is off. Connections to the directory can be intercepted.
             </p>
           )}
-          {lt('ca_cert_path', 'CA bundle path')}
-          {lt('base_dn', 'Base DN')}
-          {lt('bind_dn', 'Service account DN')}
-          <Field
-            label="Service account password"
-            hint={
-              s.data.ldap_bind_password_set
-                ? 'A password is saved. Type a new one to replace it.'
-                : 'Not set'
-            }
-            wide
-          >
-            <input
-              className="input"
-              type="password"
-              value={bindPw}
-              onChange={(e) => setBindPw(e.target.value)}
-              autoComplete="new-password"
-            />
-          </Field>
-          {lt('user_filter', 'User filter', '{user_id} is replaced (and escaped) at sign-in')}
-          {lt('user_dn_template', 'User DN template (direct bind)')}
-          {lt('attr_display_name', 'Display-name attribute')}
-          {lt('attr_email', 'Email attribute')}
-          {lt('group_attr', 'Group attribute')}
-          {lt('admin_groups', 'Administrator groups (DNs)')}
-          {lt(
-            'analyst_groups',
-            'Analyst groups (DNs)',
-            'Empty lets any directory user sign in as an analyst',
-          )}
+          <Toggle
+            checked={!!ldap.use_starttls}
+            onChange={(x) => setL('use_starttls', x)}
+            label="StartTLS (for ldap://)"
+          />
           <Toggle
             checked={ldap.auto_provision !== false}
             onChange={(x) => setL('auto_provision', x)}
             label="Create users on first sign-in"
           />
         </div>
+        {ldap.bind_mode === 'search_then_bind' && (
+          <div className="adm-form">
+            {lt('bind_dn', 'Service account DN')}
+            <Field
+              label="Service account password"
+              hint={
+                s.data.ldap_bind_password_set
+                  ? 'A password is saved. Type a new one to replace it.'
+                  : 'Not set'
+              }
+              wide
+            >
+              <input
+                className="input"
+                type="password"
+                value={bindPw}
+                onChange={(e) => setBindPw(e.target.value)}
+                autoComplete="new-password"
+              />
+            </Field>
+          </div>
+        )}
+        <details className="adm-more">
+          <summary>Attribute names</summary>
+          <div className="adm-form">
+            {lt('attr_display_name', 'Display-name attribute')}
+            {lt('attr_email', 'Email attribute')}
+            {lt('group_attr', 'Group attribute')}
+          </div>
+        </details>
+        <h4>Test sign-in</h4>
         <div className="adm-inline">
           <input
             className="input"
-            placeholder="Test user ID (optional)"
+            placeholder="User ID (optional)"
             value={testUser}
             onChange={(e) => setTestUser(e.target.value)}
+            autoComplete="off"
+          />
+          <input
+            className="input"
+            type="password"
+            placeholder="Password (optional)"
+            value={testPw}
+            onChange={(e) => setTestPw(e.target.value)}
+            autoComplete="new-password"
           />
           <button
             className="btn"
             onClick={() =>
-              act(() => post('/admin/auth/ldap/test', { test_user: testUser || null }), setTest)
+              act(
+                () =>
+                  post('/admin/auth/ldap/test', {
+                    test_user: testUser || null,
+                    test_password: testPw || null,
+                    ldap: cleaned().ldap,
+                  }),
+                setTest,
+              )
             }
           >
-            Test directory
+            Test
           </button>
-          {test && (
-            <span className={`pill ${test.ok ? 'pill-ok' : 'pill-bad'}`}>
-              {test.ok
-                ? `Connected${test.found ? `: found ${test.found.length}` : ''}`
-                : test.detail}
-            </span>
-          )}
         </div>
+        <p className="muted">
+          Tests the values on this form, before you save. The password is not stored.
+        </p>
+        {test && (
+          <ul className="ldap-steps">
+            {(test.steps || []).map((st: any, i: number) => (
+              <li key={i}>
+                <span className={`pill ${st.ok ? 'pill-ok' : 'pill-bad'}`}>
+                  {st.ok ? 'ok' : 'failed'}
+                </span>{' '}
+                <strong>{st.step}</strong>
+                {st.detail ? <span className="muted"> — {st.detail}</span> : null}
+              </li>
+            ))}
+            <li>
+              <span className={`pill ${test.ok ? 'pill-ok' : 'pill-bad'}`}>
+                {test.ok ? 'ok' : 'failed'}
+              </span>{' '}
+              {test.detail}
+            </li>
+          </ul>
+        )}
       </Card>
     </Section>
   );

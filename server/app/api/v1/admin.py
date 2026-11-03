@@ -202,17 +202,17 @@ async def put_auth_settings(body: AuthSettingsIn, ctx: RequestContext = Depends(
 
 class LdapTestIn(BaseModel):
     test_user: str | None = None
+    test_password: str | None = None
+    ldap: dict | None = None  # the form's current (maybe unsaved) values
 
 
 @router.post("/auth/ldap/test")
 async def ldap_test(body: LdapTestIn, ctx: RequestContext = Depends(admin_ctx)):
+    cfg = {**(settings.get("ldap") or {}), **(body.ldap or {})}
     try:
-        return await in_pool(ldap_auth.test_connection, settings.get("ldap") or {}, auth._ldap_bind_password(store()),
-                             body.test_user)
-    except ApiError as e:
-        return {"ok": False, "detail": e.message}
+        return await in_pool(ldap_auth.diagnose, cfg, auth._ldap_bind_password(store()), body.test_user, body.test_password)
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "detail": type(e).__name__ + ": " + str(e)[:200]}
+        return {"ok": False, "steps": [], "detail": type(e).__name__ + ": " + str(e)[:200]}
 
 
 # ============================================================================= countries / guidelines / starter prompts
@@ -486,6 +486,15 @@ class RelIn(BaseModel):
 @router.post("/schema/{cid}/crawl")
 async def crawl(cid: str, body: CrawlIn, ctx: RequestContext = Depends(admin_ctx)):
     s = store()
+    if body.include_schemas is not None:  # remember the owners / schemas for the next crawl
+        row = await s.fetchone("SELECT params FROM connections WHERE id = ?", [cid])
+        if not row:
+            raise ApiError("E-NF-001")
+        params = json.loads(row["params"]) if isinstance(row["params"], str) else (row["params"] or {})
+        clean = [x.strip() for x in body.include_schemas if x and x.strip()]
+        params["schemas"] = ", ".join(clean)
+        await s.execute("UPDATE connections SET params = ? WHERE id = ?", [json.dumps(params), cid])
+        body.include_schemas = clean or None
     if await s.fetchone("SELECT 1 AS x FROM jobs WHERE type = 'crawl_schema' AND status IN ('QUEUED','RUNNING') AND "
                         "json_extract_string(payload, '$.connection_id') = ?", [cid]):
         raise ApiError("E-SCH-002")
@@ -591,6 +600,103 @@ async def unlock_snapshot(sid: str, ctx: RequestContext = Depends(admin_ctx)):
     new_id = await schema.unlock_to_draft(store(), sid)
     await _a(ctx, "SCHEMA_EDIT", {"snapshot_id": sid, "unlocked_to": new_id})
     return {"draft_id": new_id}
+
+
+@router.delete("/schema/snapshots/{sid}")
+async def delete_snapshot(sid: str, ctx: RequestContext = Depends(admin_ctx)):
+    snap = await store().fetchone("SELECT connection_id, version, state FROM schema_snapshots WHERE id = ?", [sid])
+    await in_pool(schema.delete_snapshot, store(), sid)
+    await _a(ctx, "SCHEMA_EDIT", {"snapshot_deleted": sid, **({"version": snap["version"]} if snap else {})})
+    return {"ok": True}
+
+
+@router.post("/schema/{cid}/snapshots/prune")
+async def prune_snapshots(cid: str, ctx: RequestContext = Depends(admin_ctx)):
+    """Delete every old version (superseded or failed); keeps the locked version and the current draft."""
+    olds = await store().fetchall("SELECT id FROM schema_snapshots WHERE connection_id = ? AND state IN ('SUPERSEDED','FAILED')",
+                                  [cid])
+    for o in olds:
+        await in_pool(schema.delete_snapshot, store(), str(o["id"]))
+    await _a(ctx, "SCHEMA_EDIT", {"connection_id": cid, "snapshots_pruned": len(olds)})
+    return {"deleted": len(olds)}
+
+
+@router.get("/schema/smell-rules")
+async def get_smell_rules(ctx: RequestContext = Depends(admin_ctx)):
+    return {"items": schema.smell_rules(), "defaults": schema.SMELL_PATTERNS,
+            "classes": list(schema.SMELL_CLASSES), "severities": list(schema.SMELL_SEVERITIES)}
+
+
+@router.put("/schema/smell-rules")
+async def put_smell_rules(body: dict, ctx: RequestContext = Depends(admin_ctx)):
+    items = schema.validate_smell_rules(body.get("items") or [])
+    old = schema.smell_rules()
+    await settings.set(store(), "schema.smell_patterns", items, ctx.user_ref)
+    await _a(ctx, "SETTINGS_CHANGE", {"key": "schema.smell_patterns", "old": old, "new": items})
+    return {"items": items}
+
+
+@router.post("/schema/smell-rules/test")
+async def test_smell_rules(body: dict, ctx: RequestContext = Depends(admin_ctx)):
+    rules = schema.validate_smell_rules(body["items"]) if body.get("items") else schema.smell_rules()
+    names = [n.strip() for n in str(body.get("names") or "").replace(",", "\n").splitlines() if n.strip()]
+    out = []
+    for n in names[:200]:
+        flags, cls, sev = schema.detect_smells(n, rules)
+        out.append({"name": n, "flags": flags, "classification": cls, "severity": sev,
+                    "result": "EXCLUDED" if sev == "HIGH" else "PENDING_REVIEW" if sev == "MEDIUM" else "INCLUDED"})
+    return {"items": out}
+
+
+@router.post("/schema/snapshots/{sid}/reapply-smells")
+async def reapply_smells(sid: str, ctx: RequestContext = Depends(admin_ctx)):
+    res = await in_pool(schema.reapply_smells, store(), sid)
+    await _a(ctx, "SCHEMA_EDIT", {"snapshot_id": sid, "smells_reapplied": res})
+    return res
+
+
+@router.post("/schema/{cid}/retrieval-check")
+async def retrieval_check(cid: str, body: dict, ctx: RequestContext = Depends(admin_ctx)):
+    """For each test question, which expected tables the chat would give the AI in full (no AI call is made).
+    body.items: [{"question": "...", "expected": ["PIB.TPIB_SMS_ALERT", ...]}]"""
+    from ...services import rag
+
+    s = store()
+    rows = await rag.schema_catalog(s, cid)
+    if not rows:
+        raise ApiError("E-SCH-003")
+    embedder = llm_router.embedder(s)
+    max_full = int(settings.get("rag.schema_max_tables", 20))
+    out, hit_total, exp_total = [], 0, 0
+    for it in (body.get("items") or [])[:100]:
+        q = str(it.get("question") or "").strip()
+        expected = [str(x).strip() for x in it.get("expected") or [] if str(x).strip()]
+        if not q:
+            continue
+        qvec = None
+        if embedder is not None:
+            try:
+                qvec = (await embedder.embed([q]))[0]
+            except Exception:  # noqa: BLE001
+                qvec = None
+        ranked = await rag.retrieve_schema(s, cid, q, qvec)
+        order = [str(c["table_id"]) for c in ranked]
+        res = []
+        for e in expected:
+            found = rag.find_cards(rows, [e])
+            if not found:
+                res.append({"table": e, "exists": False, "rank": None, "in_full": False})
+                continue
+            tid = str(found[0]["table_id"])
+            rank = order.index(tid) + 1 if tid in order else None
+            ok = rank is not None and rank <= max_full
+            res.append({"table": f"{found[0]['schema_name']}.{found[0]['table_name']}", "exists": True, "rank": rank,
+                        "in_full": ok})
+            hit_total += ok
+        exp_total += len(expected)
+        out.append({"question": q, "expected": res, "top": [c["table_name"] for c in ranked[:8]]})
+    return {"items": out, "recall": round(hit_total / exp_total, 3) if exp_total else None,
+            "tables_total": len(rows), "full_detail_limit": max_full}
 
 
 @router.get("/schema/snapshots/{sid}/diff")

@@ -110,11 +110,21 @@ const ENGINE_FIELDS: Record<string, { k: string; label: string; hint?: string; t
       { k: 'database', label: 'Database' },
       { k: 'search_path', label: 'Schema search path', hint: 'Optional, e.g. sales,public' },
       { k: 'sslmode', label: 'SSL mode', hint: 'disable, prefer, require, verify-full' },
+      {
+        k: 'schemas',
+        label: 'Schemas to crawl',
+        hint: 'Comma-separated, e.g. sales, public. Blank: all non-system schemas.',
+      },
     ],
     MARIADB: [
       { k: 'host', label: 'Host' },
       { k: 'port', label: 'Port', type: 'number' },
       { k: 'database', label: 'Database' },
+      {
+        k: 'schemas',
+        label: 'Databases to crawl',
+        hint: 'Comma-separated. Blank: the database above.',
+      },
     ],
     ORACLE: [
       { k: 'mode', label: 'Connect mode', hint: 'easy, tns or wallet' },
@@ -123,6 +133,11 @@ const ENGINE_FIELDS: Record<string, { k: string; label: string; hint?: string; t
       { k: 'service_name', label: 'Service name (easy)' },
       { k: 'tns_alias', label: 'TNS alias (tns / wallet)' },
       { k: 'tns_admin', label: 'tnsnames.ora folder (tns)' },
+      {
+        k: 'schemas',
+        label: 'Table owners (schemas) to crawl',
+        hint: "e.g. PIB when you log in as PIBADM. Comma-separated; blank uses the login user's own tables. The first owner is also the default schema for queries.",
+      },
       {
         k: 'thick',
         label: 'Oracle Client (thick mode)',
@@ -331,7 +346,12 @@ export function ConnectionsSection() {
               </Select>
             </Field>
             {ENGINE_FIELDS[edit.engine].map((f) => (
-              <Field key={f.k} label={f.label} hint={f.hint} wide={f.k === 'path' || f.type === 'bool'}>
+              <Field
+                key={f.k}
+                label={f.label}
+                hint={f.hint}
+                wide={f.k === 'path' || f.type === 'bool'}
+              >
                 {f.type === 'bool' ? (
                   <label className="sqh-check">
                     <input

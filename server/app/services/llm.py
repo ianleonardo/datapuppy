@@ -345,7 +345,7 @@ def fit(p: BaseProvider, fixed: str, segments: list[tuple[str, list[str], float]
         for it in items:
             t = p.estimate_tokens(it)
             if spent + t > cap:
-                break
+                continue  # skip one that does not fit; smaller ones further down may still fit
             taken.append(it)
             spent += t
         out[name] = taken

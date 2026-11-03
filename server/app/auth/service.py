@@ -178,7 +178,7 @@ async def build_context(store: AppStore, user: dict, s: CachedSession | None = N
 # ----------------------------------------------------------------------------- login
 async def login(store: AppStore, user_id: str, password: str, tz: str | None, ip: str, ua: str | None) -> dict[str, Any]:
     limit("login-ip", ip, per_min=settings.get("ratelimit.login_per_min_ip", 20))
-    uid = (user_id or "").strip().casefold()
+    uid = (user_id or "").strip().casefold().split("\\")[-1]  # "NTSGPDOM\\ian" signs in as "ian"
     user = await store.fetchone("SELECT * FROM users WHERE user_id = ?", [uid])
 
     async def fail(reason: str, user_ref: str | None = None) -> None:
@@ -203,7 +203,10 @@ async def login(store: AppStore, user_id: str, password: str, tz: str | None, ip
         ok = verify_password(user["password_hash"], password)
         if ok and needs_rehash(user["password_hash"]):
             await store.execute("UPDATE users SET password_hash = ? WHERE id = ?", [hash_password(password), str(user["id"])])
-    elif ldap_enabled and (user is None or user["auth_source"] == "LDAP"):
+    elif (ldap_enabled and user is not None and user["auth_source"] == "LDAP") or \
+            (user is None and (ldap_enabled or ldap_auth.is_configured(ldap_cfg))):
+        # Unknown user ID: try the directory as DOMAIN\\user_id (default domain NTSGPDOM); a first sign-in creates
+        # the user as an analyst (admin group members become administrators).
         if user is None and not ldap_cfg.get("auto_provision", True):
             await fail("NO_SUCH_USER")
         ident = ldap_auth.authenticate(ldap_cfg, uid, password, _ldap_bind_password(store))

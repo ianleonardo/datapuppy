@@ -16,6 +16,7 @@ interface Msg {
   role: 'USER' | 'ASSISTANT' | 'SYSTEM_EVENT';
   content: Block[];
   artifacts?: Record<string, any>;
+  llm_meta?: Record<string, any> | null;
   streaming?: boolean;
   feedback?: number | null;
 }
@@ -157,6 +158,7 @@ export function ChatPanel() {
                         role: 'ASSISTANT',
                         content: data.content,
                         artifacts: data.artifacts,
+                        llm_meta: data.llm_meta,
                       }
                     : x,
                 ),
@@ -457,6 +459,7 @@ export function ChatPanel() {
                     />
                   </div>
                 )}
+                {!m.streaming && <ContextNote meta={m.llm_meta} />}
               </div>
             </div>
           ),
@@ -542,6 +545,36 @@ export function ChatPanel() {
 }
 
 /** Read a reply aloud (browser speech); the same button stops it. Only one reply speaks at a time. */
+/** Which tables the AI was given for this answer, so a wrong or "table not found" answer is easy to diagnose. */
+function ContextNote({ meta }: { meta?: Record<string, any> | null }) {
+  const full: string[] = meta?.tables_in_context || [];
+  if (!meta || !full.length) return null;
+  const asked: string[] = meta.tables_requested || [];
+  const total: number = meta.tables_total ?? 0;
+  const listed: number = meta.tables_listed ?? total;
+  return (
+    <details className="ctx-note">
+      <summary>
+        AI saw {full.length} table{full.length === 1 ? '' : 's'} in full
+        {asked.length ? ` (+${asked.length} it asked for)` : ''}
+        {total
+          ? ` · ${listed === total ? `all ${total}` : `${listed} of ${total}`} table names`
+          : ''}
+      </summary>
+      <div className="ctx-tables">
+        {full.map((t) => (
+          <code key={t}>{t}</code>
+        ))}
+        {asked.map((t) => (
+          <code key={`a-${t}`} className="asked" title="Requested by the AI">
+            {t}
+          </code>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function ReadAloud({ id, text }: { id: string; text: () => string }) {
   const speaking = useSpeech((s) => s.speakingId === id);
   return (

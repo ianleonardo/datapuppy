@@ -446,3 +446,19 @@ select option {
   background-color: var(--surface);
   color: var(--ink);
 }
+
+.adm-more {
+  margin: 10px 0;
+}
+.adm-more summary {
+  cursor: pointer;
+  color: var(--muted, inherit);
+  font-weight: 600;
+}
+.ldap-steps {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+}

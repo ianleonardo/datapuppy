@@ -27,8 +27,19 @@ def _vec(text: str, dim: int = 1024) -> list[float]:
     return [x / n for x in v]
 
 
-def _answer(system: str, user: str) -> dict:
-    s, u = system.lower(), user.lower()
+def _answer(system: str, user: str, all_user: str = "") -> dict:
+    s, u, au = system.lower(), user.lower(), all_user.lower()
+    if "read-only" in s and "<schema>" in s and "catalog probe" in au:  # tests: ask for a table's columns first
+        if "<more_schema>" not in u:
+            return {"reply": "Let me look at that table.", "sql": "", "need_tables": ["COUNTRIES"], "mood": "happy"}
+        assert "TABLE main.countries" in user, "columns of the requested table were sent"
+        return {"reply": "Here you go.", "sql": "SELECT country_code FROM countries", "tables_used": ["countries"],
+                "mood": "happy"}
+    if "read-only" in s and "<schema>" in s and "repair probe" in au:  # tests: wrong column, fixed after feedback
+        if "failed validation" not in u:
+            return {"reply": "Draft.", "sql": "SELECT o.ordr_dt FROM orders o", "mood": "happy"}
+        assert "ORDER_DATE" in user, "real column list was sent"
+        return {"reply": "Fixed.", "sql": "SELECT o.order_date FROM orders o", "mood": "happy"}
     if "read-only" in s and "<schema>" in s:  # GENERATE_SQL
         if "month" in u or "growth" in u:
             sql = ("WITH m AS (SELECT date_trunc('month', o.order_date) AS month, sum(p.amount) AS revenue FROM orders o "
@@ -60,7 +71,8 @@ async def chat(req: Request):
     msgs = body["messages"]
     system = "\n".join(m["content"] for m in msgs if m["role"] == "system")
     user = [m["content"] for m in msgs if m["role"] == "user"][-1]
-    content = json.dumps(_answer(system, user)) if body.get("response_format") or "json" in system.lower() else "pong"
+    all_user = "\n".join(m["content"] for m in msgs if m["role"] == "user")
+    content = json.dumps(_answer(system, user, all_user)) if body.get("response_format") or "json" in system.lower() else "pong"
     return {"choices": [{"message": {"role": "assistant", "content": "<think>hidden</think>" + content}}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
 

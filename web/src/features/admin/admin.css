@@ -427,3 +427,51 @@
 .gdocs-card {
   padding: 6px;
 }
+
+/* smell rules */
+.smell-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.smell-head h4 {
+  margin: 0;
+}
+.smell-table-wrap {
+  overflow-x: auto;
+  margin-top: 6px;
+}
+.smell-table tr.off td {
+  opacity: 0.5;
+}
+.smell-re {
+  font: 12.5px var(--font-mono, ui-monospace, monospace);
+  word-break: break-all;
+}
+.smell-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+.smell-actions .btn + .btn {
+  margin-left: 6px;
+}
+.smell-test {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+}
+.smell-test textarea {
+  flex: 1;
+}
+.schema-owners {
+  width: 200px;
+}
+.rc-table {
+  margin-top: 10px;
+}
+.rc-table .pill {
+  margin: 0 4px 4px 0;
+  display: inline-block;
+}

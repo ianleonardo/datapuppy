@@ -1,6 +1,8 @@
 import { Select } from '../../lib/Select';
 import { useEffect, useMemo, useState } from 'react';
-import { patch, post, waitJob } from '../../api/client';
+import { del, patch, post, waitJob } from '../../api/client';
+import { RetrievalCheck } from './RetrievalCheck';
+import { SmellRules } from './SmellRules';
 import { useApp } from '../../app/store';
 import { toast } from '../../lib/toast';
 import { Mascot } from '../../mascot/Mascot';
@@ -26,10 +28,16 @@ export function SchemaSection() {
   const [openTable, setOpenTable] = useState<any>(null);
   const [rel, setRel] = useState<any>(null);
   const [diff, setDiff] = useState<any>(null);
+  const [owners, setOwners] = useState('');
+  const conn = conns.data?.items.find((c: any) => c.id === cid);
 
   useEffect(() => {
     if (!cid && conns.data?.items?.length) setCid(conns.data.items[0].id);
   }, [conns.data, cid]);
+  useEffect(() => {
+    const p = conn?.params?.schemas;
+    setOwners(Array.isArray(p) ? p.join(', ') : p || '');
+  }, [conn?.id]);
   useEffect(() => {
     const items = snaps.data?.items;
     if (items?.length)
@@ -56,7 +64,11 @@ export function SchemaSection() {
   const editable = snap.data?.state === 'DRAFT';
 
   async function startCrawl() {
-    const r = await act(() => post(`/admin/schema/${cid}/crawl`, {}));
+    const include = owners
+      .split(/[,\s;]+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const r = await act(() => post(`/admin/schema/${cid}/crawl`, { include_schemas: include }));
     if (!r) return;
     setCrawl({ status: 'QUEUED' });
     const j = await waitJob((r as any).job_id, (x) => setCrawl(x));
@@ -89,6 +101,20 @@ export function SchemaSection() {
               </option>
             ))}
           </Select>
+          {conn && conn.engine !== 'DUCKDB' && (
+            <input
+              className="input schema-owners"
+              value={owners}
+              onChange={(e) => setOwners(e.target.value)}
+              placeholder={conn.engine === 'ORACLE' ? 'Owners, e.g. PIB' : 'Schemas, e.g. public'}
+              title={
+                conn.engine === 'ORACLE'
+                  ? 'Table owners to crawl, comma-separated. Blank: the login user’s own tables. The first owner also becomes the default schema for queries.'
+                  : 'Schemas to crawl, comma-separated. Blank: the default.'
+              }
+              aria-label="Schemas or owners to crawl"
+            />
+          )}
           <button
             className="btn btn-primary"
             onClick={startCrawl}
@@ -134,6 +160,51 @@ export function SchemaSection() {
             <span className={`pill ${snap.data.state === 'LOCKED' ? 'pill-ok' : 'pill-warn'}`}>
               {snap.data.state.toLowerCase()}
             </span>
+            {snap.data.state !== 'LOCKED' && (
+              <button
+                className="btn btn-sm"
+                title="Delete this version"
+                onClick={() => {
+                  if (!confirm(`Delete version ${snap.data.version}? This cannot be undone.`))
+                    return;
+                  act(
+                    () => del(`/admin/schema/snapshots/${sid}`),
+                    () => {
+                      toast(`Version ${snap.data.version} deleted`);
+                      snaps.reload();
+                    },
+                  );
+                }}
+              >
+                Delete version
+              </button>
+            )}
+            {(snaps.data?.items || []).filter((x: any) =>
+              ['SUPERSEDED', 'FAILED'].includes(x.state),
+            ).length > 0 && (
+              <button
+                className="btn btn-sm"
+                title="Delete every superseded or failed version; keeps the locked one and the draft"
+                onClick={() => {
+                  const n = snaps.data.items.filter((x: any) =>
+                    ['SUPERSEDED', 'FAILED'].includes(x.state),
+                  ).length;
+                  if (
+                    !confirm(`Delete ${n} old version${n > 1 ? 's' : ''} (superseded or failed)?`)
+                  )
+                    return;
+                  act(
+                    () => post(`/admin/schema/${cid}/snapshots/prune`),
+                    (r: any) => {
+                      toast(`${r.deleted} old version${r.deleted === 1 ? '' : 's'} deleted`);
+                      snaps.reload();
+                    },
+                  );
+                }}
+              >
+                Delete old versions
+              </button>
+            )}
             {pending > 0 && (
               <span className="pill pill-warn">
                 {pending} table{pending > 1 ? 's' : ''} to review
@@ -521,6 +592,8 @@ export function SchemaSection() {
           )}
         </Modal>
       )}
+      {cid && <RetrievalCheck cid={cid} />}
+      <SmellRules draftId={editable ? sid : undefined} onReapplied={() => snap.reload()} />
     </Section>
   );
 }

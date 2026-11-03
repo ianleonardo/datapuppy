@@ -369,3 +369,115 @@ def test_pinned_theme_survives_refresh(client):
     assert a2.get("/api/v1/me").json()["theme"] == "night"
     assert a2.put("/api/v1/me/preferences", json={"pinned_theme": ""}).status_code == 200   # unpin
     assert "pinned_theme" not in a2.get("/api/v1/me").json()["preferences"]   # clock decides from next sign-in
+
+
+def test_smell_rules_crud_test_and_reapply(client):
+    s = login(client, "admin", NEW_ADMIN_PW)
+    rules = s.get("/api/v1/admin/schema/smell-rules").json()
+    assert any(r["id"] == "SM-01" for r in rules["items"]) and "LOW" in rules["severities"]
+    bad = s.put("/api/v1/admin/schema/smell-rules", json={"items": [{"pattern": "(unclosed", "cls": "TEMP", "sev": "HIGH"}]})
+    assert bad.status_code == 422 and "invalid regex" in bad.json()["title"]
+    items = rules["items"] + [{"id": "MY-01", "label": "Report snapshot", "pattern": r"^RPT_.*_SNAP$", "cls": "ARCHIVE",
+                               "sev": "MEDIUM"}]
+    assert s.put("/api/v1/admin/schema/smell-rules", json={"items": items}).status_code == 200
+    t = s.post("/api/v1/admin/schema/smell-rules/test", json={"names": "rpt_sales_snap, orders, customers_bck"}).json()
+    by = {x["name"]: x for x in t["items"]}
+    assert by["rpt_sales_snap"]["flags"] == ["MY-01"] and by["rpt_sales_snap"]["result"] == "PENDING_REVIEW"
+    assert by["orders"]["flags"] == [] and by["customers_bck"]["result"] == "EXCLUDED"
+    # disable SM-01 and re-apply on a draft: the backup table is no longer auto-excluded
+    items = [{**r, "enabled": r["id"] != "SM-01"} for r in items]
+    assert s.put("/api/v1/admin/schema/smell-rules", json={"items": items}).status_code == 200
+    locked = next(x for x in s.get(f"/api/v1/admin/schema/{state['cid']}/snapshots").json()["items"] if x["state"] == "LOCKED")
+    assert s.post(f"/api/v1/admin/schema/snapshots/{locked['id']}/reapply-smells").status_code == 422  # drafts only
+    draft = s.post(f"/api/v1/admin/schema/snapshots/{locked['id']}/unlock").json()["draft_id"]
+    res = s.post(f"/api/v1/admin/schema/snapshots/{draft}/reapply-smells").json()
+    assert res["tables"] > 0
+    tabs = {t["table_name"]: t for t in s.get(f"/api/v1/admin/schema/snapshots/{draft}").json()["tables"]}
+    assert "SM-01" not in tabs["customers_bck"]["smell_flags"]
+    s.put("/api/v1/admin/schema/smell-rules", json={"items": rules["defaults"]})          # restore
+    state["draft"] = draft
+
+
+def test_delete_and_prune_schema_versions(client):
+    s = login(client, "admin", NEW_ADMIN_PW)
+    cid = state["cid"]
+    items = s.get(f"/api/v1/admin/schema/{cid}/snapshots").json()["items"]
+    locked = next(x for x in items if x["state"] == "LOCKED")
+    r = s.delete(f"/api/v1/admin/schema/snapshots/{locked['id']}")
+    assert r.status_code == 422                                                             # live version is protected
+    assert s.delete(f"/api/v1/admin/schema/snapshots/{state['draft']}").status_code == 200
+    left = s.get(f"/api/v1/admin/schema/{cid}/snapshots").json()["items"]
+    assert all(x["id"] != state["draft"] for x in left)
+    pr = s.post(f"/api/v1/admin/schema/{cid}/snapshots/prune").json()
+    left = s.get(f"/api/v1/admin/schema/{cid}/snapshots").json()["items"]
+    assert all(x["state"] not in ("SUPERSEDED", "FAILED") for x in left) and pr["deleted"] >= 0
+    assert any(x["state"] == "LOCKED" for x in left)
+
+
+def test_crawl_remembers_schemas_to_crawl(client):
+    s = login(client, "admin", NEW_ADMIN_PW)
+    cid = state["cid"]
+    jid = s.post(f"/api/v1/admin/schema/{cid}/crawl", json={"include_schemas": ["nosuchschema"]}).json()["job_id"]
+    job = wait_job(s, jid)
+    assert job["status"] == "FAILED" and "nosuchschema" in (job.get("error") or "")
+    conn = next(c for c in s.get("/api/v1/admin/connections").json()["items"] if c["id"] == cid)
+    assert conn["params"]["schemas"] == "nosuchschema"
+    jid = s.post(f"/api/v1/admin/schema/{cid}/crawl", json={"include_schemas": []}).json()["job_id"]  # back to default
+    assert wait_job(s, jid)["status"] == "SUCCEEDED"
+
+
+def test_unknown_user_signs_in_through_ldap_as_analyst(client, monkeypatch):
+    from app.auth import ldap_auth
+
+    seen = {}
+
+    def fake_auth(cfg, uid, pw, bind_pw):
+        seen["bind"] = ldap_auth.bind_name(cfg, uid)
+        return ldap_auth.LdapIdentity("CN=Dir User,DC=SG", "Dir User", "dir@x.com", []) if pw == "dirpass" else None
+
+    monkeypatch.setattr(ldap_auth, "authenticate", fake_auth)
+    s = login(client, "admin", NEW_ADMIN_PW)
+    vals = s.get("/api/v1/admin/auth/settings").json()["values"]
+    ldap = {**vals["ldap"], "server_urls": ["ldaps://dc.example:636"], "domain": ""}
+    assert s.put("/api/v1/admin/auth/settings", json={"values": {**vals, "ldap": ldap}}).status_code == 200
+    client.cookies.clear()
+    bad = client.post("/api/v1/auth/login", json={"user_id": "diruser", "password": "nope", "tz": "UTC"})
+    assert bad.status_code == 401
+    r = client.post("/api/v1/auth/login", json={"user_id": "NTSGPDOM\\diruser", "password": "dirpass", "tz": "UTC"})
+    assert r.status_code == 200, r.text
+    assert seen["bind"] == "NTSGPDOM\\diruser"                     # default domain when none is configured
+    me = r.json()["user"]
+    assert me["user_id"] == "diruser" and me["role"] == "ANALYST" and me["auth_source"] == "LDAP"
+
+
+def test_chat_sees_every_table_and_can_ask_for_columns(client):
+    import tests.fake_llm as fake
+
+    a = login(client, "alice", ANALYST_PW)
+    sess = a.post("/api/v1/chat/sessions", json={"connection_id": state["cid"]}).json()
+    fake.CALLS.clear()
+    r = a.post(f"/api/v1/chat/sessions/{sess['id']}/messages", json={"prompt": "catalog probe: list the codes"})
+    done = json.loads(sse_events(r.text)[-1][1])
+    first = next(c for c in fake.CALLS if c["kind"] == "chat")["body"]["messages"][0]["content"]
+    assert "<catalog>" in first and "main.orders" in first and "main.countries" in first     # every table is listed
+    assert done["artifacts"]["sql"] == "SELECT country_code FROM countries"
+    meta = done["llm_meta"]
+    assert meta["tables_requested"] == ["countries"] and meta["tables_total"] >= 5 and meta["tables_listed"] == meta["tables_total"]
+
+
+def test_repair_round_sends_real_column_names(client):
+    a = login(client, "alice", ANALYST_PW)
+    sess = a.post("/api/v1/chat/sessions", json={"connection_id": state["cid"]}).json()
+    r = a.post(f"/api/v1/chat/sessions/{sess['id']}/messages", json={"prompt": "repair probe: order dates"})
+    done = json.loads(sse_events(r.text)[-1][1])
+    assert done["artifacts"]["sql"] == "SELECT o.order_date FROM orders o"
+
+
+def test_retrieval_check(client):
+    s = login(client, "admin", NEW_ADMIN_PW)
+    r = s.post(f"/api/v1/admin/schema/{state['cid']}/retrieval-check", json={"items": [
+        {"question": "payments per order", "expected": ["payments", "orders"]},
+        {"question": "x", "expected": ["no_such_table"]}]}).json()
+    first, second = r["items"]
+    assert all(e["in_full"] and e["rank"] for e in first["expected"])
+    assert second["expected"][0]["exists"] is False and 0 < r["recall"] < 1

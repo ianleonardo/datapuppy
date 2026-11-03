@@ -448,7 +448,8 @@ class PostgresAdapter(BaseAdapter):
             "LEFT JOIN pg_namespace n ON n.nspname = t.table_schema LEFT JOIN pg_class c ON c.relname = t.table_name "
             f"AND c.relnamespace = n.oid WHERE 1=1 {flt} ORDER BY 1, 2", 120, params=prm)
         _, cols = self._run(
-            "SELECT t.table_schema, t.table_name, t.column_name, t.data_type, t.is_nullable = 'YES', t.ordinal_position "
+            "SELECT t.table_schema, t.table_name, t.column_name, t.data_type, t.is_nullable = 'YES', t.ordinal_position, "
+            "col_description(format('%I.%I', t.table_schema, t.table_name)::regclass, t.ordinal_position) "
             f"FROM information_schema.columns t WHERE 1=1 {flt}", 120, params=prm)
         _, keys = self._run(
             "SELECT tc.table_schema, tc.table_name, tc.constraint_type, tc.constraint_name, kcu.column_name, "
@@ -518,8 +519,8 @@ class MariaDBAdapter(BaseAdapter):
         _, tables = self._run("SELECT TABLE_SCHEMA, TABLE_NAME, IF(TABLE_TYPE='VIEW','VIEW','TABLE'), TABLE_ROWS, "
                               f"TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA IN ({ph}) ORDER BY 1,2",
                               120, params=sch)
-        _, cols = self._run("SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE='YES', ORDINAL_POSITION "
-                            f"FROM information_schema.COLUMNS WHERE TABLE_SCHEMA IN ({ph})", 120, params=sch)
+        _, cols = self._run("SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE='YES', ORDINAL_POSITION, "
+                            f"COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA IN ({ph})", 120, params=sch)
         _, keys = self._run(
             "SELECT k.TABLE_SCHEMA, k.TABLE_NAME, IF(k.CONSTRAINT_NAME='PRIMARY','PRIMARY KEY','FOREIGN KEY'), "
             "k.CONSTRAINT_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_SCHEMA, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME "
@@ -538,6 +539,13 @@ class MariaDBAdapter(BaseAdapter):
 
 
 # ----------------------------------------------------------------------------- Oracle
+def _first_schema(params: dict) -> str | None:
+    """First entry of 'Schemas / owners to crawl', upper-cased; only plain Oracle identifiers are accepted."""
+    raw = params.get("schemas") or ""
+    first = (raw[0] if isinstance(raw, list) and raw else re.split(r"[,\s;]+", str(raw).strip())[0]).strip().upper()
+    return first if re.fullmatch(r"[A-Z][A-Z0-9_$#]{0,127}", first or "") else None
+
+
 def _has_oracle_client(lib_dir: str) -> bool:
     d = Path(lib_dir)
     if not d.is_dir():
@@ -574,6 +582,10 @@ class OracleAdapter(BaseAdapter):
             else:
                 kw.update(dsn=f"{p['host']}:{p.get('port', 1521)}/{p['service_name']}")
             con = oracledb.connect(**kw)
+            owner = _first_schema(p)
+            if owner:  # e.g. log in as PIBADM but work on PIB's tables without prefixing every name
+                with con.cursor() as cur:
+                    cur.execute(f'ALTER SESSION SET CURRENT_SCHEMA = "{owner}"')
         except ApiError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -661,8 +673,9 @@ class OracleAdapter(BaseAdapter):
                      "all_tab_comments c ON c.owner = t.owner AND c.table_name = t.table_name "
                      f"WHERE t.owner IN ({ph}) AND t.table_name NOT LIKE 'BIN$%' UNION ALL SELECT owner, view_name, "
                      f"'VIEW', NULL, NULL FROM all_views WHERE owner IN ({ph})")
-        cols = run("SELECT owner, table_name, column_name, data_type, CASE nullable WHEN 'Y' THEN 1 ELSE 0 END, column_id "
-                   f"FROM all_tab_columns WHERE owner IN ({ph})")
+        cols = run("SELECT c.owner, c.table_name, c.column_name, c.data_type, CASE c.nullable WHEN 'Y' THEN 1 ELSE 0 END, "
+                   "c.column_id, cc.comments FROM all_tab_columns c LEFT JOIN all_col_comments cc ON cc.owner = c.owner "
+                   f"AND cc.table_name = c.table_name AND cc.column_name = c.column_name WHERE c.owner IN ({ph})")
         keys = run("SELECT c.owner, c.table_name, DECODE(c.constraint_type,'P','PRIMARY KEY','FOREIGN KEY'), "
                    "c.constraint_name, cc.column_name, r.owner, r.table_name, rc.column_name FROM all_constraints c "
                    "JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name "
@@ -701,9 +714,11 @@ def _assemble(tables, cols, keys) -> CatalogDump:
                 d["from_cols"].append(col)
                 d["to_cols"].append(rcol)
     by: dict[tuple, list] = {}
-    for s, t, c, dt, nul, pos in cols:
+    for row in cols:  # (schema, table, column, type, nullable, position[, comment])
+        s, t, c, dt, nul, pos = row[:6]
+        cm = row[6] if len(row) > 6 else None
         by.setdefault((s, t), []).append({"name": c, "type": dt, "nullable": bool(nul), "ordinal": int(pos or 0),
-                                          "pk": c in pk.get((s, t), set()), "comment": None})
+                                          "pk": c in pk.get((s, t), set()), "comment": (str(cm).strip() or None) if cm else None})
     for s, t, typ, est, cm in tables:
         dump.tables.append({"schema": s, "name": t, "type": typ, "row_estimate": int(est) if est and est > 0 else None,
                             "comment": cm, "columns": sorted(by.get((s, t), []), key=lambda x: x["ordinal"])})

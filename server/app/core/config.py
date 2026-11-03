@@ -68,8 +68,8 @@ DEFAULTS: dict[str, Any] = {
         "ldap": {
             "server_urls": ["ldaps://<ldap-host>:636"],
             "base_dn": "DC=<domain>,DC=<tld>",
-            "user_filter": "(&(objectClass=user)(sAMAccountName={user_id}))",
-            "bind_mode": "search_then_bind",
+            "user_filter": "(sAMAccountName={username})",
+            "bind_mode": "domain",
             "bind_dn": "",
             "bind_password": "",
         },

@@ -323,6 +323,40 @@ needs Oracle Instant Client ("thick mode").
 - Thick mode is switched on once per server process, so restart after changing it. It applies to all Oracle
   connections of that process. To keep one connection on thin mode, set `thick` to false in its params.
 
+### Schema governance tips
+
+- **Oracle table owners.** If you log in as one user (e.g. `PIBADM`) but the tables belong to another owner (`PIB`),
+  type the owner in the box next to **Crawl schema** (or in the connection's "Table owners (schemas) to crawl"). Several
+  owners are comma-separated. The first owner also becomes the session's default schema, so `FROM TPIB_SMS_ALERT` works
+  without the `PIB.` prefix.
+- **Smell rules.** At the bottom of Schema governance: regex rules (case-insensitive, matched against the table name)
+  that flag backups, temp and archive tables. HIGH excludes the table, MEDIUM asks for review, LOW only flags. Add,
+  edit, delete or switch rules off, test table names, then **Re-apply to draft** (your own include/exclude decisions are
+  kept) or crawl again.
+- **Versions.** **Delete version** removes the selected draft or old version; **Delete old versions** removes every
+  superseded or failed one. The locked (live) version cannot be deleted.
+- **Chat cannot find a table?** Only *included* tables of the *locked* version reach the AI. Excluded tables are greyed
+  out in the list; include them and lock again. Naming the table in the question (`TPIB_SMS_ALERT`) always puts it first.
+
+### Active Directory (LDAP) sign-in
+
+Admin → Authentication → LDAP directory. Fill in (same logic as most AD-integrated tools):
+
+| Field | Example |
+|---|---|
+| NetBIOS domain | `NTSGPDOM` |
+| LDAP servers (one per line) | `ldaps://sg.uobnet.com:636` |
+| Bind mode | `DOMAIN\login_id (AD)` — people sign in with their own password; no service account needed |
+| User base DN | `DC=SG,DC=UOBNET,DC=COM` |
+| User filter | `(sAMAccountName={username})` |
+| Admin group DN / Allowed group DN | optional, one DN per line |
+
+Turn on the **LDAP directory** switch above it and save. People type their plain login ID (`ian`, or `NTSGPDOM\ian`).
+**Test** checks the values on the form before you save, step by step (connect, bind, find the user, groups, role);
+enter a user ID and password to test a real sign-in. If *Connect* fails with a certificate or host-name message, turn off
+**Verify TLS certificate** or set a CA bundle path. Use "Service account search" only for directories that do not allow
+signing in as `DOMAIN\login_id`.
+
 ### How it works
 
 - **Data and config are host folders.** `DATA_DIR` is mounted at `/data` and `CONFIG_DIR` at `/app/config`, so the

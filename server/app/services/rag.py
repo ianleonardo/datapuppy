@@ -309,38 +309,194 @@ async def retrieve_knowledge(store: AppStore, ctx: RequestContext, prompt: str, 
     return fused
 
 
+def _words(text: str) -> set[str]:
+    """Lower-case words of a prompt or identifier; identifiers are split on '_' / '.' too (SMS_ALERT → sms, alert),
+    and a trailing plural 's' is dropped so 'alerts' matches ALERT."""
+    out: set[str] = set()
+    for w in re.findall(r"[A-Za-z0-9_$#.]+", text or ""):
+        lw = w.lower().strip(".")
+        if len(lw) >= 2:
+            out.add(lw)
+        for part in re.split(r"[_.$#]+", lw):
+            if len(part) >= 2:
+                out.add(part)
+                if len(part) > 3 and part.endswith("s"):
+                    out.add(part[:-1])
+    return out
+
+
+def _card_columns(card_text: str) -> list[str]:
+    return [ln.strip()[2:].split(" ")[0] for ln in card_text.splitlines() if ln.startswith("  - ") and "→" not in ln]
+
+
+def schema_scores(cards: list[dict], prompt: str) -> dict[str, float]:
+    """Keyword relevance of each schema card to the prompt. A table named in the prompt (TPIB_SMS_ALERT or
+    PIB.TPIB_SMS_ALERT, any case) always ranks first; named columns rank next; then shared words."""
+    p_low = (prompt or "").lower()
+    p_words = _words(prompt)
+    scores: dict[str, float] = {}
+    for c in cards:
+        name = str(c["table_name"]).lower()
+        header = c["card_text"].split("\n", 1)[0].lower()
+        sc = 0.0
+        if re.search(rf"(?<![\w$#]){re.escape(name)}(?![\w$#])", p_low):
+            sc += 1000
+        alias = re.search(r"\(alias: ([^)]+)\)", header)
+        if alias and alias.group(1).strip().lower() in p_low:
+            sc += 500
+        cols = _card_columns(c["card_text"])
+        sc += 50 * min(5, sum(1 for col in cols if len(col) > 2 and col.lower() in p_words))
+        sc += 8 * len(_words(name) & p_words)
+        sc += min(10, len(_words(" ".join(cols)) & p_words))
+        sc += min(5, len(_words(c["card_text"]) & p_words) * 0.2)
+        scores[str(c["table_id"])] = sc
+    return scores
+
+
 async def retrieve_schema(store: AppStore, conn_id: str, prompt: str, qvec: list[float] | None) -> list[dict]:
-    """Top-k schema cards + 1-hop FK neighbours, capped (TS §8.4 step 1)."""
+    """Schema cards for the prompt, best first: tables named in the prompt, then a fusion of vector similarity and
+    keyword overlap, then 1-hop FK neighbours (TS §8.4 step 1). Always ranked, so the token budget trims the least
+    relevant tables, never the one the user asked about."""
     cards = await store.fetchall("SELECT c.table_id, c.card_text, t.table_name, c.embedding IS NOT NULL AS has_vec "
                                  "FROM schema_cards c JOIN schema_tables t ON t.id = c.table_id WHERE c.connection_id = ?",
                                  [conn_id])
+    if not cards:
+        return []
     max_tables = int(settings.get("rag.schema_max_tables", 20))
-    if len(cards) <= max_tables:
-        return cards
     top_k = int(settings.get("rag.schema_top_k", 12))
-    chosen: list[dict] = []
+    kw = schema_scores(cards, prompt)
+    kw_rank = [str(c["table_id"]) for c in sorted(cards, key=lambda c: -kw[str(c["table_id"])])]
+    vec_rank: list[str] = []
     if qvec is not None and any(c["has_vec"] for c in cards):
         dim = len(qvec)
-        chosen = await store.fetchall(
-            f"SELECT c.table_id, c.card_text, t.table_name, array_cosine_similarity(c.embedding, ?::FLOAT[{dim}]) AS score "
-            "FROM schema_cards c JOIN schema_tables t ON t.id = c.table_id WHERE c.connection_id = ? AND c.embedding IS NOT "
-            "NULL ORDER BY score DESC LIMIT ?", [qvec, conn_id, top_k])
-    else:
-        words = {w.lower() for w in re.findall(r"[A-Za-z_]{3,}", prompt)}
-        scored = sorted(cards, key=lambda c: -sum(w in c["card_text"].lower() for w in words))
-        chosen = scored[:top_k]
+        vec_rank = [str(r["table_id"]) for r in await store.fetchall(
+            f"SELECT c.table_id, array_cosine_similarity(c.embedding, ?::FLOAT[{dim}]) AS score FROM schema_cards c "
+            "WHERE c.connection_id = ? AND c.embedding IS NOT NULL ORDER BY score DESC LIMIT ?", [qvec, conn_id, max_tables * 2])]
+    fused: dict[str, float] = {}
+    for rank_list in (kw_rank, vec_rank):
+        for i, tid in enumerate(rank_list):
+            fused[tid] = fused.get(tid, 0.0) + 1.0 / (60 + i)
+    named = {tid for tid, sc in kw.items() if sc >= 50}  # named table / alias / column: always kept, always first
+    order = sorted(fused, key=lambda t: (-(kw[t] >= 500), -(t in named), -fused[t]))
+    by_id = {str(c["table_id"]): c for c in cards}
+    keep = max(top_k, len([t for t in order if t in named]))
+    chosen = [by_id[t] for t in order[:keep] if t in by_id]
     ids = {str(c["table_id"]) for c in chosen}
     neigh = await store.fetchall(
         "SELECT DISTINCT CASE WHEN list_contains(?, CAST(from_table_id AS VARCHAR)) THEN to_table_id ELSE from_table_id END "
         "AS tid FROM schema_relationships r JOIN schema_snapshots s ON s.id = r.snapshot_id WHERE s.connection_id = ? AND "
         "s.state = 'LOCKED' AND (list_contains(?, CAST(from_table_id AS VARCHAR)) OR list_contains(?, CAST(to_table_id AS VARCHAR)))",
         [list(ids), conn_id, list(ids), list(ids)])
-    by_id = {str(c["table_id"]): c for c in cards}
     for n in neigh:
-        if len(chosen) >= max_tables:
-            break
         tid = str(n["tid"])
+        if len(chosen) >= max(max_tables, keep):
+            break
         if tid not in ids and tid in by_id:
             chosen.append(by_id[tid])
             ids.add(tid)
+    for t in order:  # small schemas: everything fits, still best first
+        if len(chosen) >= max(max_tables, keep):
+            break
+        if t not in ids:
+            chosen.append(by_id[t])
+            ids.add(t)
     return chosen
+
+
+def compact_card(card_text: str, prompt: str, max_chars: int = 6000) -> str:
+    """Shorten a very wide table's card for the prompt without hiding any column: columns named in the prompt, keys
+    and aliased/described ones keep their full line; the rest are listed by name only."""
+    if len(card_text) <= max_chars:
+        return card_text
+    p_words = _words(prompt)
+    head, cols, tail, in_cols = [], [], [], False
+    for ln in card_text.splitlines():
+        if ln == "columns:":
+            in_cols = True
+            continue
+        if ln == "joins:":
+            in_cols = False
+        if in_cols and ln.startswith("  - "):
+            cols.append(ln)
+        elif in_cols:
+            continue
+        else:
+            (tail if cols else head).append(ln)
+    full, short = [], []
+    for ln in cols:
+        name = ln.strip()[2:].split(" ")[0]
+        important = name.lower() in p_words or "[PK" in ln or "alias " in ln or " — " in ln or bool(_words(name) & p_words)
+        (full if important and len(full) < 60 else short).append(ln if important and len(full) < 60 else name)
+    budget = max_chars - sum(len(x) + 1 for x in head + full + tail) - 80
+    names = ", ".join(short)
+    if len(names) > budget > 0:
+        names = names[:budget].rsplit(", ", 1)[0] + ", …"
+    body = head + ["columns:"] + full + ([f"  other columns (name only): {names}"] if short else []) + tail
+    return "\n".join(body)
+
+
+# ----------------------------------------------------------------------------- full table list ("catalog")
+async def schema_catalog(store: AppStore, conn_id: str) -> list[dict]:
+    """Every table of the locked schema the AI may use (one card per included table)."""
+    return await store.fetchall(
+        "SELECT t.id AS table_id, t.schema_name, t.table_name, t.alias, t.description, t.object_type, c.card_text "
+        "FROM schema_cards c JOIN schema_tables t ON t.id = c.table_id WHERE c.connection_id = ? "
+        "ORDER BY t.schema_name, t.table_name", [conn_id])
+
+
+def catalog_text(rows: list[dict], first_ids: list[str], estimate, max_tokens: int) -> tuple[str, int]:
+    """The list of ALL tables for the prompt, so the AI never thinks a table does not exist.
+
+    One line per table (OWNER.TABLE, alias, short description), most relevant first. If that is too long for the
+    budget, descriptions are dropped and names are grouped per owner; only if even that does not fit (thousands of
+    tables) is the tail cut. Returns (text, number of tables listed)."""
+    if not rows:
+        return "", 0
+    rank = {tid: i for i, tid in enumerate(first_ids)}
+    ordered = sorted(rows, key=lambda r: (rank.get(str(r["table_id"]), len(rank)), r["schema_name"], r["table_name"]))
+
+    def line(r: dict) -> str:
+        s = f"{r['schema_name']}.{r['table_name']}"
+        if r.get("object_type") == "VIEW":
+            s += " (view)"
+        if r.get("alias"):
+            s += f" [alias {r['alias']}]"
+        d = " ".join(str(r.get("description") or "").split())
+        return s + (f" — {d[:90]}" if d else "")
+
+    full = "\n".join(line(r) for r in ordered)
+    if estimate(full) <= max_tokens:
+        return full, len(ordered)
+    groups: dict[str, list[str]] = {}
+    for r in ordered:
+        groups.setdefault(r["schema_name"], []).append(r["table_name"] + (f"[{r['alias']}]" if r.get("alias") else ""))
+    compact = "\n".join(f"{s}: {', '.join(n)}" for s, n in groups.items())
+    if estimate(compact) <= max_tokens:
+        return compact, len(ordered)
+    kept, out = 0, []
+    for r in ordered:
+        nxt = f"{r['schema_name']}.{r['table_name']}"
+        if estimate(", ".join(out + [nxt])) > max_tokens:
+            break
+        out.append(nxt)
+        kept += 1
+    return ", ".join(out), kept
+
+
+def find_cards(rows: list[dict], names: list[str]) -> list[dict]:
+    """Catalog rows for table names the AI or the SQL used: OWNER.TABLE, TABLE or an alias, any case."""
+    by_full = {f"{r['schema_name']}.{r['table_name']}".lower(): r for r in rows}
+    by_name: dict[str, list[dict]] = {}
+    for r in rows:
+        by_name.setdefault(r["table_name"].lower(), []).append(r)
+        if r.get("alias"):
+            by_name.setdefault(str(r["alias"]).lower(), []).append(r)
+    out, seen = [], set()
+    for n in names:
+        key = str(n or "").strip().strip('"').lower()
+        hits = [by_full[key]] if key in by_full else by_name.get(key.split(".")[-1], [])
+        for r in hits:
+            if str(r["table_id"]) not in seen:
+                seen.add(str(r["table_id"]))
+                out.append(r)
+    return out

@@ -16,18 +16,54 @@ from .settings import settings
 log = logging.getLogger("sqlassist.schema")
 
 # ----------------------------------------------------------------------------- Appendix C
-SMELL_PATTERNS: list[dict[str, str]] = [
-    {"id": "SM-01", "pattern": r"(_|^)(BCK|BAK|BKP|BACKUP)(_|$)", "cls": "BACKUP", "sev": "HIGH"},
-    {"id": "SM-02", "pattern": r"(_|^)(TMP|TEMP)(_|$)", "cls": "TEMP", "sev": "HIGH"},
-    {"id": "SM-03", "pattern": r"^OLD_|_OLD$", "cls": "ARCHIVE", "sev": "HIGH"},
-    {"id": "SM-04", "pattern": r"_(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$", "cls": "BACKUP", "sev": "MEDIUM"},
-    {"id": "SM-05", "pattern": r"_(19|20)\d{2}(0[1-9]|1[0-2])$", "cls": "ARCHIVE", "sev": "MEDIUM"},
-    {"id": "SM-06", "pattern": r"(_|^)(COPY|CPY|DUP)\d*(_|$)", "cls": "BACKUP", "sev": "MEDIUM"},
-    {"id": "SM-07", "pattern": r"(_|^)(TEST|TST|DEBUG|SCRATCH)(_|$)", "cls": "TEMP", "sev": "MEDIUM"},
-    {"id": "SM-08", "pattern": r"(_|^)(DEPRECATED|DEPR|UNUSED|DO_NOT_USE|DNU)(_|$)", "cls": "ARCHIVE", "sev": "HIGH"},
-    {"id": "SM-09", "pattern": r"(_|^)(ARCH|ARCHIVE)(_|$)", "cls": "ARCHIVE", "sev": "MEDIUM"},
-    {"id": "SM-10", "pattern": r"^BIN\$", "cls": "TEMP", "sev": "HIGH"},
+SMELL_PATTERNS = [
+    {"id": "SM-01", "label": "Backup copy", "pattern": r"(_|^)(BCK|BAK|BKP|BACKUP)(_|$)", "cls": "BACKUP", "sev": "HIGH"},
+    {"id": "SM-02", "label": "Temporary table", "pattern": r"(_|^)(TMP|TEMP)(_|$)", "cls": "TEMP", "sev": "HIGH"},
+    {"id": "SM-03", "label": "Old copy", "pattern": r"^OLD_|_OLD$", "cls": "ARCHIVE", "sev": "HIGH"},
+    {"id": "SM-04", "label": "Date suffix (YYYYMMDD)", "pattern": r"_(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$",
+     "cls": "BACKUP", "sev": "MEDIUM", "check_date": True},
+    {"id": "SM-05", "label": "Month suffix (YYYYMM)", "pattern": r"_(19|20)\d{2}(0[1-9]|1[0-2])$", "cls": "ARCHIVE", "sev": "MEDIUM"},
+    {"id": "SM-06", "label": "Copy / duplicate", "pattern": r"(_|^)(COPY|CPY|DUP)\d*(_|$)", "cls": "BACKUP", "sev": "MEDIUM"},
+    {"id": "SM-07", "label": "Test / scratch", "pattern": r"(_|^)(TEST|TST|DEBUG|SCRATCH)(_|$)", "cls": "TEMP", "sev": "MEDIUM"},
+    {"id": "SM-08", "label": "Deprecated / do not use", "pattern": r"(_|^)(DEPRECATED|DEPR|UNUSED|DO_NOT_USE|DNU)(_|$)",
+     "cls": "ARCHIVE", "sev": "HIGH"},
+    {"id": "SM-09", "label": "Archive", "pattern": r"(_|^)(ARCH|ARCHIVE)(_|$)", "cls": "ARCHIVE", "sev": "MEDIUM"},
+    {"id": "SM-10", "label": "Oracle recycle bin", "pattern": r"^BIN\$", "cls": "TEMP", "sev": "HIGH"},
 ]
+SMELL_CLASSES = ("BACKUP", "TEMP", "ARCHIVE", "STAGING", "UNKNOWN")
+SMELL_SEVERITIES = ("HIGH", "MEDIUM", "LOW")  # HIGH → excluded, MEDIUM → needs review, LOW → flag only
+
+
+def smell_rules() -> list[dict]:
+    """The admin's rules (Admin → Schema governance → Smell rules), or the built-in defaults."""
+    rules = settings.get("schema.smell_patterns")
+    return rules if isinstance(rules, list) and rules else [dict(r) for r in SMELL_PATTERNS]
+
+
+def validate_smell_rules(rules: list[dict]) -> list[dict]:
+    """Check and normalise admin-entered rules; raises ApiError E-VAL-001 with the first problem."""
+    out, seen = [], set()
+    for i, r in enumerate(rules or [], 1):
+        pat = str(r.get("pattern") or "").strip()
+        if not pat:
+            raise ApiError("E-VAL-001", detail=f"Rule {i}: the regex is empty")
+        try:
+            re.compile(pat, re.I)
+        except re.error as e:
+            raise ApiError("E-VAL-001", detail=f"Rule {i}: invalid regex ({e})") from e
+        cls, sev = str(r.get("cls") or "UNKNOWN").upper(), str(r.get("sev") or "MEDIUM").upper()
+        if cls not in SMELL_CLASSES:
+            raise ApiError("E-VAL-001", detail=f"Rule {i}: classification must be one of {', '.join(SMELL_CLASSES)}")
+        if sev not in SMELL_SEVERITIES:
+            raise ApiError("E-VAL-001", detail=f"Rule {i}: severity must be HIGH, MEDIUM or LOW")
+        rid = str(r.get("id") or "").strip() or f"SM-{i:02d}"
+        while rid in seen:
+            rid += "x"
+        seen.add(rid)
+        out.append({"id": rid, "label": str(r.get("label") or "").strip(), "pattern": pat, "cls": cls, "sev": sev,
+                    "enabled": r.get("enabled", True) is not False, "check_date": bool(r.get("check_date"))})
+    return out
+
 
 SENSITIVITY_PATTERNS = {
     "RESTRICTED": ["NRIC", "FIN", "SSN", "PASSPORT", "CARD_NO", "CARDNO", "ACCOUNT_NO", "ACCT_NO", "DOB",
@@ -48,16 +84,68 @@ def _valid_date_suffix(name: str) -> bool:
 
 
 def detect_smells(name: str, patterns: list[dict] | None = None) -> tuple[list[str], str | None, str | None]:
-    """Returns (flags, classification, highest severity)."""
+    """Returns (flags, classification, highest severity) from the smell rules (regex, case-insensitive)."""
+    rank = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
     flags, cls, sev = [], None, None
-    for p in patterns or settings.get("schema.smell_patterns") or SMELL_PATTERNS:
-        if re.search(p["pattern"], name, re.I):
-            if p["id"] == "SM-04" and not _valid_date_suffix(name):
-                continue
-            flags.append(p["id"])
-            if sev != "HIGH":
-                cls, sev = p["cls"], p["sev"]
+    for p in patterns or smell_rules():
+        if p.get("enabled") is False:
+            continue
+        try:
+            hit = re.search(p["pattern"], name, re.I)
+        except re.error:
+            continue
+        if not hit or ((p.get("check_date") or p.get("id") == "SM-04") and not _valid_date_suffix(name)):
+            continue
+        flags.append(p["id"])
+        if rank.get(p.get("sev"), 0) > rank.get(sev, 0):
+            cls, sev = p.get("cls"), p.get("sev")
     return flags, cls, sev
+
+
+def reapply_smells(store: AppStore, snap_id: str) -> dict[str, int]:
+    """Re-run the smell rules on a DRAFT snapshot. Tables an admin already decided on keep their inclusion."""
+    snap = store.fetchall_sync("SELECT state FROM schema_snapshots WHERE id = ?", [snap_id])
+    if not snap or snap[0]["state"] != "DRAFT":
+        raise ApiError("E-VAL-001", detail="Smell rules can only be re-applied to a draft. Unlock to a new draft first.")
+    rules = smell_rules()
+    rows_ = store.fetchall_sync("SELECT id, table_name, decided_by FROM schema_tables WHERE snapshot_id = ?", [snap_id])
+    names = {r["table_name"] for r in rows_}
+    counts = {"tables": len(rows_), "flagged": 0, "excluded": 0, "pending": 0}
+
+    def unit(c):
+        for r in rows_:
+            flags, smell_cls, sev = detect_smells(r["table_name"], rules)
+            counts["flagged"] += bool(flags)
+            sets = ["smell_flags = ?", "base_table_hint = ?"]
+            vals: list = [flags, base_table_hint(r["table_name"], names) if flags else None]
+            if r["decided_by"] is None:  # never undo an admin's own decision
+                incl = "EXCLUDED" if sev == "HIGH" else "PENDING_REVIEW" if sev == "MEDIUM" else "INCLUDED"
+                counts["excluded"] += incl == "EXCLUDED"
+                counts["pending"] += incl == "PENDING_REVIEW"
+                sets.append("inclusion = ?")
+                vals.append(incl)
+                if smell_cls:
+                    sets += ["classification = ?", "class_confidence = 0.9"]
+                    vals.append(smell_cls)
+            c.execute(f"UPDATE schema_tables SET {', '.join(sets)} WHERE id = ?", vals + [r["id"]])
+    store.write_sync(unit)
+    return counts
+
+
+def delete_snapshot(store: AppStore, snap_id: str) -> None:
+    """Delete one schema version and everything in it. The LOCKED (live) version cannot be deleted."""
+    snap = store.fetchall_sync("SELECT state FROM schema_snapshots WHERE id = ?", [snap_id])
+    if not snap:
+        raise ApiError("E-NF-001")
+    if snap[0]["state"] in ("LOCKED", "CRAWLING"):
+        raise ApiError("E-VAL-001", detail="The locked (live) version and a running crawl cannot be deleted.")
+
+    def unit(c):
+        c.execute("DELETE FROM schema_columns WHERE table_id IN (SELECT id FROM schema_tables WHERE snapshot_id = ?)", [snap_id])
+        c.execute("DELETE FROM schema_relationships WHERE snapshot_id = ?", [snap_id])
+        c.execute("DELETE FROM schema_tables WHERE snapshot_id = ?", [snap_id])
+        c.execute("DELETE FROM schema_snapshots WHERE id = ?", [snap_id])
+    store.write_sync(unit)
 
 
 def base_table_hint(name: str, all_names: set[str]) -> str | None:
@@ -109,6 +197,17 @@ def column_sensitivity(name: str) -> str:
 
 
 # ----------------------------------------------------------------------------- crawl (job task body)
+def configured_schemas(connection: dict[str, Any]) -> list[str] | None:
+    """Schemas / owners to crawl from the connection's params ('schemas': 'PIB, PIBRPT' or a list)."""
+    params = connection.get("params") or {}
+    if isinstance(params, str):
+        params = json.loads(params or "{}")
+    raw = params.get("schemas") or []
+    items = raw if isinstance(raw, list) else re.split(r"[,\s;]+", str(raw))
+    out = [str(x).strip() for x in items if str(x).strip()]
+    return out or None
+
+
 def crawl(store: AppStore, connection: dict[str, Any], adapter, job_id: str, include_schemas: list[str] | None,
           progress) -> dict[str, Any]:
     conn_id = str(connection["id"])
@@ -119,7 +218,12 @@ def crawl(store: AppStore, connection: dict[str, Any], adapter, job_id: str, inc
                                          "VALUES (?, ?, ?, 'CRAWLING', ?)", [snap_id, conn_id, version, job_id]))
     try:
         progress({"phase": "introspecting"})
+        include_schemas = include_schemas or configured_schemas(connection)
         dump = adapter.introspect(include_schemas)
+        if not dump.tables:
+            raise ApiError("E-VAL-001", detail="No tables found" + (f" for schema/owner {', '.join(include_schemas)}"
+                           if include_schemas else " in the login user's own schema") + ". Set 'Schemas / owners to crawl' "
+                           "(e.g. the table owner PIB) and check that the login user can see those tables.")
         max_tables = int(settings.get("schema.max_tables", 5000))
         truncated = len(dump.tables) > max_tables
         tables = dump.tables[:max_tables]

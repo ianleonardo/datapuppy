@@ -340,3 +340,74 @@ def test_embed_cards_survives_a_failing_card():
     out = asyncio.run(embed_cards(Emb(), ["a", "BAD", "ccc", "d" * 20000]))
     assert out[0] == [1.0] and out[1] is None and out[2] == [3.0]
     assert out[3] == [6000.0]                      # long card cut for embedding only
+
+
+def test_ldap_domain_bind_logic():
+    from app.auth import ldap_auth as la
+
+    cfg = {"domain": "NTSGPDOM", "bind_mode": "domain", "server_urls": ["ldaps://127.0.0.1:1"], "verify_ssl": False,
+           "base_dn": "DC=SG,DC=UOBNET,DC=COM", "user_filter": "(sAMAccountName={username})", "connect_timeout_s": 2}
+    assert la.login_name("NTSGPDOM\\ian") == "ian" and la.login_name("ian@corp.com") == "ian"
+    assert la.bind_name(cfg, "ian") == "NTSGPDOM\\ian" and la.bind_name(cfg, "NTSGPDOM\\ian") == "NTSGPDOM\\ian"
+    assert la.build_filter(cfg["user_filter"], "a*)(x") == "(sAMAccountName=a\\2a\\29\\28x)"
+    assert la.effective_mode({"bind_mode": "search_then_bind"}) == "domain"          # no service account -> domain bind
+    assert la.effective_mode({"bind_mode": "search_then_bind", "bind_dn": "CN=svc"}) == "search"
+    assert la.effective_mode({"bind_mode": "direct_bind"}) == "domain"
+    out = la.diagnose(cfg, None, None, None)                                           # nothing listens on port 1
+    assert out["ok"] is False and out["steps"][0]["step"] == "Connect" and "Cannot connect" in out["detail"]
+    assert la.diagnose({**cfg, "server_urls": ["ldaps://<ldap-host>:636"]}, None, None, None)["ok"] is False
+
+
+def test_ldap_domain_bind_signin_against_mock_directory(monkeypatch):
+    from ldap3 import MOCK_SYNC, Connection, Server
+
+    from app.auth import ldap_auth as la
+
+    server = Server("fake")
+    base = "DC=SG,DC=UOBNET,DC=COM"
+    seed = Connection(server, client_strategy=MOCK_SYNC)
+    # The mock directory cannot hold a DOMAIN\\login name, so the bind name is mapped to a DN of the same account.
+    seed.strategy.add_entry("cn=ian,dc=x", {"userPassword": "secret", "objectClass": "person"})
+    seed.strategy.add_entry(f"CN=Ian L,OU=Staff,{base}",
+                            {"sAMAccountName": "ian", "displayName": "Ian L", "mail": "ian@x.com",
+                             "memberOf": [f"CN=Analysts,{base}"], "objectClass": "person"})
+    binds = []
+
+    def fake_connection(cfg, user, password):
+        binds.append(user)
+        c = Connection(server, user={"NTSGPDOM\\ian": "cn=ian,dc=x"}.get(user, user), password=password,
+                       client_strategy=MOCK_SYNC, raise_exceptions=False)
+        c.strategy.entries.update(seed.strategy.entries)
+        c.open()
+        return c
+
+    monkeypatch.setattr(la, "_connection", fake_connection)
+    cfg = {"domain": "NTSGPDOM", "bind_mode": "domain", "base_dn": base, "user_filter": "(sAMAccountName={username})"}
+    ident = la.authenticate(cfg, "NTSGPDOM\\ian", "secret", None)
+    assert binds == ["NTSGPDOM\\ian"]                                  # bound as DOMAIN\\login_id, no service account
+    assert ident and ident.display_name == "Ian L" and ident.email == "ian@x.com"
+    assert ident.groups == [f"CN=Analysts,{base}"]
+    assert la.authenticate(cfg, "ian", "wrong", None) is None
+    out = la.diagnose({**cfg, "server_urls": ["ldaps://h:636"]}, None, "ian", "secret")   # step list for the Test button
+    assert out["steps"][0]["step"] == "Connect"
+
+
+def test_schema_ranking_puts_named_table_first_and_compacts_wide_cards():
+    from app.services.rag import compact_card, schema_scores
+
+    def card(tid, name, cols):
+        return {"table_id": tid, "table_name": name,
+                "card_text": f"TABLE PIB.{name}\nkind: fact; rows≈1\ncolumns:\n" + "\n".join(f"  - {c} VARCHAR2" for c in cols)}
+
+    wide = card("w", "TPIB_CUSTOMER_PROFILE", [f"ATTR_{i:03d}" for i in range(400)] + ["CIF_NO"])
+    cards = [wide, card("a", "TPIB_SMS_ALERT", ["CREATEDBY", "SMS_COUNT", "ALERT_TYPE"]),
+             card("b", "TPIB_LOGIN_AUDIT", ["USER_ID", "LOGIN_TS"])]
+    sc = schema_scores(cards, "top 10 senders in tpib_sms_alert by createdby")
+    assert sc["a"] > sc["w"] and sc["a"] > sc["b"] and sc["a"] >= 1000
+    sc2 = schema_scores(cards, "how many sms alerts per day")              # words, plural, no exact name
+    assert max(sc2, key=sc2.get) == "a"
+    sc3 = schema_scores(cards, "show CIF_NO and ATTR_007")                 # columns named
+    assert max(sc3, key=sc3.get) == "w"
+    short = compact_card(wide["card_text"], "show CIF_NO", max_chars=3000)
+    assert len(short) <= 3100 and "  - CIF_NO VARCHAR2" in short and "other columns (name only)" in short
+    assert "ATTR_000" in short                                              # still listed, by name
